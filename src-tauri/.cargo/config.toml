@@ -1,0 +1,13 @@
+# Faster linker for Windows
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+# Faster linker for Windows GNU
+[target.x86_64-pc-windows-gnu]
+linker = "rust-lld.exe"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+# Parallel compilation
+[build]
+jobs = 4  # Adjust based on your CPU cores
