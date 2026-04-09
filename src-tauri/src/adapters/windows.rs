@@ -17,27 +17,56 @@ impl WindowsAdapter {
         let mut packages = Vec::new();
         let lines: Vec<&str> = output.lines().collect();
         
-        // Skip header lines (first 2 lines)
-        for line in lines.iter().skip(2) {
-            if line.trim().is_empty() {
-                continue;
+        let mut dash_idx = None;
+        for (i, line) in lines.iter().enumerate() {
+            // Count dashes to find the separator line robustly, ignoring any ANSI escape sequences
+            let dash_count = line.chars().filter(|&c| c == '-').count();
+            if dash_count > 20 {
+                dash_idx = Some(i);
+                break;
             }
-            
-            // Parse winget output format: Name  Id  Version  Available  Source
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                let name = parts[0].to_string();
-                let id = if parts.len() > 1 { parts[1].to_string() } else { name.clone() };
-                let version = if parts.len() > 2 { parts[2].to_string() } else { "unknown".to_string() };
+        }
+        
+        if let Some(idx) = dash_idx {
+            for line in lines.iter().skip(idx + 1) {
+                if line.trim().is_empty() {
+                    continue;
+                }
                 
-                packages.push(Package {
-                    id: id.clone(),
-                    name,
-                    version,
-                    manager: PackageManager::Winget,
-                    description: None,
-                    installed_date: None,
-                });
+                // Strip possible ANSI codes safely (they don't contain tabs or double spaces typically)
+                // Actually, split by double space or tab directly:
+                let cols: Vec<&str> = line.split("  ")
+                    .flat_map(|s| s.split('\t'))
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                
+                if cols.len() < 2 {
+                    continue;
+                }
+                
+                let name = cols[0].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
+                let id = cols[1].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
+                let version = if cols.len() > 2 {
+                    cols[2].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string()
+                } else {
+                    "unknown".to_string()
+                };
+                
+                if id.to_lowercase().contains("packages") || name.to_lowercase().contains("source requires") || name.contains("---") {
+                    continue;
+                }
+                
+                if !name.is_empty() && !id.is_empty() {
+                    packages.push(Package {
+                        id,
+                        name,
+                        version,
+                        manager: PackageManager::Winget,
+                        description: None,
+                        installed_date: None,
+                    });
+                }
             }
         }
         
@@ -48,84 +77,68 @@ impl WindowsAdapter {
         let mut updates = Vec::new();
         let lines: Vec<&str> = output.lines().collect();
         
-        // Find the separator line (dashes)
-        let separator_index = lines.iter().position(|line| {
-            line.contains("---") && line.len() > 50
-        });
-        
-        if separator_index.is_none() {
-            tracing::warn!("Could not find separator line in winget output");
-            return updates;
+        let mut dash_idx = None;
+        for (i, line) in lines.iter().enumerate() {
+            // Count dashes to find the separator line robustly, ignoring any ANSI escape sequences
+            let dash_count = line.chars().filter(|&c| c == '-').count();
+            if dash_count > 20 {
+                dash_idx = Some(i);
+                break;
+            }
         }
         
-        // Process lines after separator
-        for line in lines.iter().skip(separator_index.unwrap() + 1) {
-            let trimmed = line.trim();
-            
-            // Skip empty lines and summary lines
-            if trimmed.is_empty() || trimmed.contains("upgrades available") {
-                continue;
-            }
-            
-            // Try to extract using regex-like pattern
-            // Format: Name (variable width) | Id (variable width) | Version | Available | Source
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            
-            if parts.len() < 4 {
-                continue;
-            }
-            
-            // Find version-like strings (contain dots or numbers)
-            let mut version_indices = Vec::new();
-            for (i, part) in parts.iter().enumerate() {
-                if part.contains('.') || part.chars().all(|c| c.is_numeric() || c == '.') {
-                    version_indices.push(i);
+        if let Some(idx) = dash_idx {
+            for line in lines.iter().skip(idx + 1) {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                
+                let rest_words: Vec<&str> = line.split_whitespace().collect();
+                if rest_words.len() < 4 {
+                    continue;
+                }
+                
+                let len = rest_words.len();
+                let mut new_version_idx = len - 1;
+                
+                // Identify if the last column is "Source" (usually winget or msstore)
+                let last_word_lower = rest_words[len - 1].to_lowercase();
+                if last_word_lower.contains("winget") || last_word_lower.contains("msstore") || last_word_lower.contains("source") {
+                    new_version_idx = len - 2;
+                }
+                
+                if new_version_idx < 2 {
+                    continue;
+                }
+                
+                let new_version = rest_words[new_version_idx].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
+                let current_version = rest_words[new_version_idx - 1].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
+                let id = rest_words[new_version_idx - 2].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
+                let name = rest_words[0..(new_version_idx - 2)].join(" ").replace("\x1b", "").replace("[0m", "").replace("[32m", "").trim().to_string();
+                
+                if id.to_lowercase().contains("upgrades") || current_version.to_lowercase().contains("available") || name.to_lowercase().contains("source requires") {
+                    continue;
+                }
+                
+                if !name.is_empty() && !id.is_empty() && current_version != "unknown" && new_version != "unknown" {
+                    let package = Package {
+                        id: id.clone(),
+                        name,
+                        version: current_version,
+                        manager: PackageManager::Winget,
+                        description: None,
+                        installed_date: None,
+                    };
+                    
+                    updates.push(PackageUpdate {
+                        package,
+                        new_version,
+                        size_bytes: None,
+                        priority: crate::backend::models::UpdatePriority::Normal,
+                        changelog: None,
+                    });
                 }
             }
-            
-            if version_indices.len() < 2 {
-                continue;
-            }
-            
-            // Last two version-like strings are current and available versions
-            let current_version_idx = version_indices[version_indices.len() - 2];
-            let new_version_idx = version_indices[version_indices.len() - 1];
-            
-            let current_version = parts[current_version_idx].to_string();
-            let new_version = parts[new_version_idx].to_string();
-            
-            // ID is typically before the version
-            let id_idx = if current_version_idx > 0 {
-                current_version_idx - 1
-            } else {
-                continue;
-            };
-            
-            let id = parts[id_idx].to_string();
-            
-            // Name is everything before the ID
-            let name = parts[..id_idx].join(" ");
-            
-            if name.is_empty() || id.is_empty() {
-                continue;
-            }
-            
-            let package = Package {
-                id: id.clone(),
-                name,
-                version: current_version,
-                manager: PackageManager::Winget,
-                description: None,
-                installed_date: None,
-            };
-            
-            updates.push(PackageUpdate {
-                package,
-                new_version,
-                size_bytes: None,
-                priority: crate::backend::models::UpdatePriority::Normal,
-                changelog: None,
-            });
         }
         
         tracing::info!("Parsed {} updates from winget", updates.len());
@@ -186,37 +199,177 @@ impl PlatformAdapter for WindowsAdapter {
     }
 
     fn get_package_managers(&self) -> Vec<PackageManager> {
-        vec![PackageManager::Winget]
+        vec![
+            PackageManager::Winget,
+            PackageManager::Npm,
+            PackageManager::Chocolatey,
+        ]
     }
 
     async fn scan_packages(&self, manager: &PackageManager) -> Result<Vec<Package>> {
         match manager {
             PackageManager::Winget => {
-                let output = Command::new("winget")
-                    .args(&["list"])
-                    .output()?;
-                
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                Ok(self.parse_winget_list(&stdout))
+                if let Ok(output) = Command::new("winget").args(&["list", "--accept-source-agreements"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    return Ok(self.parse_winget_list(&stdout));
+                }
+                Ok(Vec::new())
+            }
+            PackageManager::Npm => {
+                if let Ok(output) = Command::new("cmd").args(&["/C", "npm list -g --depth=0 --json"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    // Minimal JSON parsing for npm list
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                        let mut packages = Vec::new();
+                        if let Some(deps) = json.get("dependencies").and_then(|d| d.as_object()) {
+                            for (name, info) in deps {
+                                if let Some(version) = info.get("version").and_then(|v| v.as_str()) {
+                                    packages.push(Package {
+                                        id: name.clone(),
+                                        name: name.clone(),
+                                        version: version.to_string(),
+                                        manager: PackageManager::Npm,
+                                        description: None,
+                                        installed_date: None,
+                                    });
+                                }
+                            }
+                        }
+                        return Ok(packages);
+                    }
+                }
+                Ok(Vec::new())
+            }
+            PackageManager::Chocolatey => {
+                if let Ok(output) = Command::new("choco").args(&["list", "--local-only"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let mut packages = Vec::new();
+                    for line in stdout.lines() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() == 2 && !line.contains("packages installed") {
+                            packages.push(Package {
+                                id: parts[0].to_string(),
+                                name: parts[0].to_string(),
+                                version: parts[1].to_string(),
+                                manager: PackageManager::Chocolatey,
+                                description: None,
+                                installed_date: None,
+                            });
+                        }
+                    }
+                    return Ok(packages);
+                }
+                Ok(Vec::new())
             }
             _ => Ok(Vec::new()),
         }
     }
 
     async fn check_package_updates(&self, _packages: &[Package]) -> Result<Vec<PackageUpdate>> {
-        // Use winget upgrade to check for updates
-        let output = Command::new("winget")
-            .args(&["upgrade"])
-            .output()?;
-        
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(self.parse_winget_upgrades(&stdout))
+        let mut all_updates = Vec::new();
+
+        // Winget
+        if let Ok(output) = Command::new("winget").args(&["upgrade", "--include-unknown", "--accept-source-agreements"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            all_updates.extend(self.parse_winget_upgrades(&stdout));
+        }
+
+        // NPM
+        if let Ok(output) = Command::new("cmd").args(&["/C", "npm outdated -g --json"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                if let Some(deps) = json.as_object() {
+                    for (name, info) in deps {
+                        if let (Some(current), Some(latest)) = (
+                            info.get("current").and_then(|v| v.as_str()),
+                            info.get("latest").and_then(|v| v.as_str())
+                        ) {
+                            if current != latest {
+                                all_updates.push(PackageUpdate {
+                                    package: Package {
+                                        id: name.clone(),
+                                        name: name.clone(),
+                                        version: current.to_string(),
+                                        manager: PackageManager::Npm,
+                                        description: None,
+                                        installed_date: None,
+                                    },
+                                    new_version: latest.to_string(),
+                                    size_bytes: None,
+                                    priority: crate::backend::models::UpdatePriority::Normal,
+                                    changelog: None,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Chocolatey
+        if let Ok(output) = Command::new("choco").args(&["outdated"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut dash_found = false;
+            for line in stdout.lines() {
+                if line.starts_with('-') {
+                    dash_found = true;
+                    continue;
+                }
+                if dash_found && !line.trim().is_empty() && line.contains('|') {
+                    let parts: Vec<&str> = line.split('|').collect();
+                    if parts.len() >= 3 {
+                        let name = parts[0].trim();
+                        let current = parts[1].trim();
+                        let latest = parts[2].trim();
+                        if name != "" && current != "" && latest != "" {
+                            all_updates.push(PackageUpdate {
+                                package: Package {
+                                    id: name.to_string(),
+                                    name: name.to_string(),
+                                    version: current.to_string(),
+                                    manager: PackageManager::Chocolatey,
+                                    description: None,
+                                    installed_date: None,
+                                },
+                                new_version: latest.to_string(),
+                                size_bytes: None,
+                                priority: crate::backend::models::UpdatePriority::Normal,
+                                changelog: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(all_updates)
     }
 
     async fn apply_package_update(&self, update: &PackageUpdate) -> Result<UpdateResult> {
-        let output = Command::new("winget")
-            .args(&["upgrade", "--id", &update.package.id, "--silent", "--accept-source-agreements", "--accept-package-agreements"])
-            .output()?;
+        let output = match update.package.manager {
+            PackageManager::Winget => {
+                Command::new("winget")
+                    .args(&["upgrade", "--id", &update.package.id, "--silent", "--accept-source-agreements", "--accept-package-agreements"])
+                    .output()?
+            }
+            PackageManager::Npm => {
+                Command::new("cmd")
+                    .args(&["/C", &format!("npm install -g {}@latest", update.package.id)])
+                    .output()?
+            }
+            PackageManager::Chocolatey => {
+                Command::new("choco")
+                    .args(&["upgrade", &update.package.id, "-y"])
+                    .output()?
+            }
+            _ => {
+                return Ok(UpdateResult {
+                    status: crate::backend::models::UpdateStatus::Failed,
+                    error: Some("Unsupported package manager for update".to_string()),
+                    duration: chrono::Duration::seconds(0),
+                })
+            }
+        };
         
         if output.status.success() {
             Ok(UpdateResult {
@@ -226,9 +379,53 @@ impl PlatformAdapter for WindowsAdapter {
             })
         } else {
             let error_msg = String::from_utf8_lossy(&output.stderr).to_string();
+            let out_msg = String::from_utf8_lossy(&output.stdout).to_string();
             Ok(UpdateResult {
                 status: crate::backend::models::UpdateStatus::Failed,
-                error: Some(error_msg),
+                error: Some(format!("{} | {}", error_msg, out_msg)),
+                duration: chrono::Duration::seconds(0),
+            })
+        }
+    }
+
+    async fn rollback_package(&self, package: &Package, target_version: &str) -> Result<UpdateResult> {
+        let output = match package.manager {
+            PackageManager::Winget => {
+                Command::new("winget")
+                    .args(&["install", "--id", &package.id, "-v", target_version, "--silent", "--force", "--accept-source-agreements", "--accept-package-agreements"])
+                    .output()?
+            }
+            PackageManager::Npm => {
+                Command::new("cmd")
+                    .args(&["/C", &format!("npm install -g {}@{}", package.id, target_version)])
+                    .output()?
+            }
+            PackageManager::Chocolatey => {
+                Command::new("choco")
+                    .args(&["install", &package.id, "--version", target_version, "-y", "--allow-downgrade"])
+                    .output()?
+            }
+            _ => {
+                return Ok(UpdateResult {
+                    status: crate::backend::models::UpdateStatus::Failed,
+                    error: Some("Unsupported package manager for rollback".to_string()),
+                    duration: chrono::Duration::seconds(0),
+                })
+            }
+        };
+
+        if output.status.success() {
+            Ok(UpdateResult {
+                status: crate::backend::models::UpdateStatus::Completed,
+                error: None,
+                duration: chrono::Duration::seconds(0),
+            })
+        } else {
+            let error_msg = String::from_utf8_lossy(&output.stderr).to_string();
+            let out_msg = String::from_utf8_lossy(&output.stdout).to_string();
+            Ok(UpdateResult {
+                status: crate::backend::models::UpdateStatus::Failed,
+                error: Some(format!("{} | {}", error_msg, out_msg)),
                 duration: chrono::Duration::seconds(0),
             })
         }
@@ -270,7 +467,7 @@ impl PlatformAdapter for WindowsAdapter {
 
     async fn get_package_details(&self, package_id: &str) -> Result<Option<PackageDetails>> {
         let output = Command::new("winget")
-            .args(&["show", "--id", package_id])
+            .args(&["show", "--id", package_id, "--accept-source-agreements"])
             .output()?;
         
         if !output.status.success() {

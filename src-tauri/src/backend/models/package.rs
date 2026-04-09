@@ -6,6 +6,11 @@ pub enum PackageManager {
     // Windows
     Winget,
     Chocolatey,
+    Scoop,
+    
+    // Cross-platform
+    Npm,
+    Cargo,
     
     // macOS
     Homebrew,

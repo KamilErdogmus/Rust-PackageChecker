@@ -78,7 +78,10 @@ impl PlatformAdapter for MacOSAdapter {
     }
 
     fn get_package_managers(&self) -> Vec<PackageManager> {
-        vec![PackageManager::Homebrew]
+        vec![
+            PackageManager::Homebrew,
+            PackageManager::Npm,
+        ]
     }
 
     async fn scan_packages(&self, manager: &PackageManager) -> Result<Vec<Package>> {
@@ -89,11 +92,35 @@ impl PlatformAdapter for MacOSAdapter {
                     .output()?;
 
                 if !output.status.success() {
-                    return Err("Failed to execute brew list".into());
+                    return Ok(Vec::new());
                 }
 
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 Ok(self.parse_brew_list(&stdout))
+            }
+            PackageManager::Npm => {
+                if let Ok(output) = Command::new("npm").args(&["list", "-g", "--depth=0", "--json"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                        let mut packages = Vec::new();
+                        if let Some(deps) = json.get("dependencies").and_then(|d| d.as_object()) {
+                            for (name, info) in deps {
+                                if let Some(version) = info.get("version").and_then(|v| v.as_str()) {
+                                    packages.push(Package {
+                                        id: name.clone(),
+                                        name: name.clone(),
+                                        version: version.to_string(),
+                                        manager: PackageManager::Npm,
+                                        description: None,
+                                        installed_date: None,
+                                    });
+                                }
+                            }
+                        }
+                        return Ok(packages);
+                    }
+                }
+                Ok(Vec::new())
             }
             _ => Ok(Vec::new()),
         }
@@ -104,16 +131,47 @@ impl PlatformAdapter for MacOSAdapter {
     }
 
     async fn check_package_updates(&self, _packages: &[Package]) -> Result<Vec<PackageUpdate>> {
-        let output = Command::new("brew")
-            .args(["outdated", "--verbose"])
-            .output()?;
+        let mut all_updates = Vec::new();
 
-        if !output.status.success() {
-            return Ok(Vec::new());
+        // Homebrew
+        if let Ok(output) = Command::new("brew").args(["outdated", "--verbose"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            all_updates.extend(self.parse_brew_outdated(&stdout));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(self.parse_brew_outdated(&stdout))
+        // NPM
+        if let Ok(output) = Command::new("npm").args(&["outdated", "-g", "--json"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                if let Some(deps) = json.as_object() {
+                    for (name, info) in deps {
+                        if let (Some(current), Some(latest)) = (
+                            info.get("current").and_then(|v| v.as_str()),
+                            info.get("latest").and_then(|v| v.as_str())
+                        ) {
+                            if current != latest {
+                                all_updates.push(PackageUpdate {
+                                    package: Package {
+                                        id: name.clone(),
+                                        name: name.clone(),
+                                        version: current.to_string(),
+                                        manager: PackageManager::Npm,
+                                        description: None,
+                                        installed_date: None,
+                                    },
+                                    new_version: latest.to_string(),
+                                    size_bytes: None,
+                                    priority: crate::backend::models::UpdatePriority::Normal,
+                                    changelog: None,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(all_updates)
     }
 
     async fn check_driver_updates(&self, _drivers: &[Driver]) -> Result<Vec<DriverUpdate>> {
@@ -121,9 +179,64 @@ impl PlatformAdapter for MacOSAdapter {
     }
 
     async fn apply_package_update(&self, update: &PackageUpdate) -> Result<UpdateResult> {
-        let output = Command::new("brew")
-            .args(["upgrade", &update.package.id])
-            .output()?;
+        let output = match update.package.manager {
+            PackageManager::Homebrew => {
+                Command::new("brew")
+                    .args(["upgrade", "-q", &update.package.id])
+                    .output()?
+            }
+            PackageManager::Npm => {
+                Command::new("npm")
+                    .args(&["install", "-g", "--silent", &format!("{}@latest", update.package.id)])
+                    .output()?
+            }
+            _ => {
+                return Ok(UpdateResult {
+                    status: crate::backend::models::UpdateStatus::Failed,
+                    error: Some("Unsupported package manager on macOS".to_string()),
+                    duration: chrono::Duration::seconds(0),
+                })
+            }
+        };
+
+        if output.status.success() {
+            Ok(UpdateResult {
+                status: crate::backend::models::UpdateStatus::Completed,
+                error: None,
+                duration: chrono::Duration::seconds(0),
+            })
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Ok(UpdateResult {
+                status: crate::backend::models::UpdateStatus::Failed,
+                error: Some(stderr.to_string()),
+                duration: chrono::Duration::seconds(0),
+            })
+        }
+    }
+
+    async fn rollback_package(&self, package: &Package, target_version: &str) -> Result<UpdateResult> {
+        let output = match package.manager {
+            PackageManager::Homebrew => {
+                return Ok(UpdateResult {
+                    status: crate::backend::models::UpdateStatus::Failed,
+                    error: Some("Homebrew doesn't easily support arbitrary version rollbacks without specific taps/formulas.".to_string()),
+                    duration: chrono::Duration::seconds(0),
+                });
+            }
+            PackageManager::Npm => {
+                Command::new("npm")
+                    .args(&["install", "-g", "--silent", &format!("{}@{}", package.id, target_version)])
+                    .output()?
+            }
+            _ => {
+                return Ok(UpdateResult {
+                    status: crate::backend::models::UpdateStatus::Failed,
+                    error: Some("Unsupported package manager for rollback".to_string()),
+                    duration: chrono::Duration::seconds(0),
+                })
+            }
+        };
 
         if output.status.success() {
             Ok(UpdateResult {

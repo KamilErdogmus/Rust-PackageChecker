@@ -17,6 +17,7 @@ pub trait PlatformAdapter: Send + Sync {
     async fn scan_packages(&self, manager: &PackageManager) -> Result<Vec<Package>>;
     async fn check_package_updates(&self, packages: &[Package]) -> Result<Vec<PackageUpdate>>;
     async fn apply_package_update(&self, update: &PackageUpdate) -> Result<UpdateResult>;
+    async fn rollback_package(&self, package: &Package, target_version: &str) -> Result<UpdateResult>;
     async fn get_package_details(&self, package_id: &str) -> Result<Option<PackageDetails>>;
     
     // Driver operations

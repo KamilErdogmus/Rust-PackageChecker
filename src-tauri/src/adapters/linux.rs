@@ -174,47 +174,60 @@ impl LinuxAdapter {
 
 #[async_trait]
 impl PlatformAdapter for LinuxAdapter {
-    async fn scan_packages(&self) -> Result<Vec<Package>> {
-        match self.package_manager {
+    fn get_package_managers(&self) -> Vec<PackageManager> {
+        let mut managers = vec![self.package_manager.clone()];
+        managers.push(PackageManager::Npm);
+        managers
+    }
+
+    async fn scan_packages(&self, manager: &PackageManager) -> Result<Vec<Package>> {
+        match manager {
             PackageManager::Apt => {
-                let output = Command::new("apt")
-                    .args(["list", "--installed"])
-                    .output()?;
-
-                if !output.status.success() {
-                    return Err("Failed to execute apt list".into());
+                if let Ok(output) = Command::new("apt").args(["list", "--installed"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    return Ok(self.parse_apt_list(&stdout));
                 }
-
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                Ok(self.parse_apt_list(&stdout))
+                Ok(Vec::new())
             }
             PackageManager::Dnf => {
-                let output = Command::new("dnf")
-                    .args(["list", "installed"])
-                    .output()?;
-
-                if !output.status.success() {
-                    return Err("Failed to execute dnf list".into());
+                if let Ok(output) = Command::new("dnf").args(["list", "installed"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    return Ok(self.parse_dnf_list(&stdout));
                 }
-
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                Ok(self.parse_dnf_list(&stdout))
+                Ok(Vec::new())
             }
             PackageManager::Pacman => {
-                let output = Command::new("pacman")
-                    .args(["-Q"])
-                    .output()?;
-
-                if !output.status.success() {
-                    return Err("Failed to execute pacman -Q".into());
+                if let Ok(output) = Command::new("pacman").args(["-Q"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    return Ok(self.parse_pacman_list(&stdout));
                 }
-
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                Ok(self.parse_pacman_list(&stdout))
+                Ok(Vec::new())
             }
-            PackageManager::Unknown => {
-                Err("No supported package manager found".into())
+            PackageManager::Npm => {
+                if let Ok(output) = Command::new("npm").args(&["list", "-g", "--depth=0", "--json"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                        let mut packages = Vec::new();
+                        if let Some(deps) = json.get("dependencies").and_then(|d| d.as_object()) {
+                            for (name, info) in deps {
+                                if let Some(version) = info.get("version").and_then(|v| v.as_str()) {
+                                    packages.push(Package {
+                                        id: name.clone(),
+                                        name: name.clone(),
+                                        version: version.to_string(),
+                                        manager: PackageManager::Npm,
+                                        description: None,
+                                        installed_date: None,
+                                    });
+                                }
+                            }
+                        }
+                        return Ok(packages);
+                    }
+                }
+                Ok(Vec::new())
             }
+            _ => Ok(Vec::new()),
         }
     }
 
@@ -224,122 +237,195 @@ impl PlatformAdapter for LinuxAdapter {
         Ok(Vec::new())
     }
 
-    async fn check_package_updates(&self, packages: &[Package]) -> Result<Vec<(Package, String)>> {
+    async fn check_package_updates(&self, packages: &[Package]) -> Result<Vec<PackageUpdate>> {
+        let mut updates = Vec::new();
+
+        // System PM
         match self.package_manager {
             PackageManager::Apt => {
-                let output = Command::new("apt")
-                    .args(["list", "--upgradable"])
-                    .output()?;
-
-                if !output.status.success() {
-                    return Ok(Vec::new());
-                }
-
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let upgradable = self.parse_apt_upgradable(&stdout);
-                
-                let mut updates = Vec::new();
-                for (pkg_name, new_version) in upgradable {
-                    if let Some(package) = packages.iter().find(|p| p.id == pkg_name) {
-                        updates.push((package.clone(), new_version));
+                if let Ok(output) = Command::new("apt").args(["list", "--upgradable"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let upgradable = self.parse_apt_upgradable(&stdout);
+                    for (pkg_name, new_version) in upgradable {
+                        updates.push(PackageUpdate {
+                            package: Package {
+                                id: pkg_name.clone(),
+                                name: pkg_name,
+                                version: "unknown".to_string(), // In real app, match from packages
+                                manager: PackageManager::Apt,
+                                description: None,
+                                installed_date: None,
+                            },
+                            new_version,
+                            size_bytes: None,
+                            priority: crate::backend::models::UpdatePriority::Normal,
+                            changelog: None,
+                        });
                     }
                 }
-
-                Ok(updates)
             }
             PackageManager::Dnf => {
-                let output = Command::new("dnf")
-                    .args(["check-update"])
-                    .output()?;
-
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let upgradable = self.parse_dnf_check_update(&stdout);
-                
-                let mut updates = Vec::new();
-                for (pkg_name, new_version) in upgradable {
-                    if let Some(package) = packages.iter().find(|p| p.id == pkg_name) {
-                        updates.push((package.clone(), new_version));
+                if let Ok(output) = Command::new("dnf").args(["check-update"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let upgradable = self.parse_dnf_check_update(&stdout);
+                    for (pkg_name, new_version) in upgradable {
+                        updates.push(PackageUpdate {
+                            package: Package {
+                                id: pkg_name.clone(),
+                                name: pkg_name,
+                                version: "unknown".to_string(),
+                                manager: PackageManager::Dnf,
+                                description: None,
+                                installed_date: None,
+                            },
+                            new_version,
+                            size_bytes: None,
+                            priority: crate::backend::models::UpdatePriority::Normal,
+                            changelog: None,
+                        });
                     }
                 }
-
-                Ok(updates)
             }
             PackageManager::Pacman => {
-                let output = Command::new("pacman")
-                    .args(["-Qu"])
-                    .output()?;
-
-                if !output.status.success() {
-                    return Ok(Vec::new());
-                }
-
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let upgradable = self.parse_pacman_updates(&stdout);
-                
-                let mut updates = Vec::new();
-                for (pkg_name, new_version) in upgradable {
-                    if let Some(package) = packages.iter().find(|p| p.id == pkg_name) {
-                        updates.push((package.clone(), new_version));
+                if let Ok(output) = Command::new("pacman").args(["-Qu"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let upgradable = self.parse_pacman_updates(&stdout);
+                    for (pkg_name, new_version) in upgradable {
+                        updates.push(PackageUpdate {
+                            package: Package {
+                                id: pkg_name.clone(),
+                                name: pkg_name,
+                                version: "unknown".to_string(),
+                                manager: PackageManager::Pacman,
+                                description: None,
+                                installed_date: None,
+                            },
+                            new_version,
+                            size_bytes: None,
+                            priority: crate::backend::models::UpdatePriority::Normal,
+                            changelog: None,
+                        });
                     }
                 }
-
-                Ok(updates)
             }
-            PackageManager::Unknown => {
-                Err("No supported package manager found".into())
+            _ => {}
+        }
+
+        // NPM
+        if let Ok(output) = Command::new("npm").args(&["outdated", "-g", "--json"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                if let Some(deps) = json.as_object() {
+                    for (name, info) in deps {
+                        if let (Some(current), Some(latest)) = (
+                            info.get("current").and_then(|v| v.as_str()),
+                            info.get("latest").and_then(|v| v.as_str())
+                        ) {
+                            if current != latest {
+                                updates.push(PackageUpdate {
+                                    package: Package {
+                                        id: name.clone(),
+                                        name: name.clone(),
+                                        version: current.to_string(),
+                                        manager: PackageManager::Npm,
+                                        description: None,
+                                        installed_date: None,
+                                    },
+                                    new_version: latest.to_string(),
+                                    size_bytes: None,
+                                    priority: crate::backend::models::UpdatePriority::Normal,
+                                    changelog: None,
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        Ok(updates)
     }
 
     async fn check_driver_updates(&self, _drivers: &[Driver]) -> Result<Vec<(Driver, String)>> {
         Ok(Vec::new())
     }
 
-    async fn update_package(&self, package: &Package) -> Result<()> {
-        match self.package_manager {
+    async fn rollback_package(&self, _package: &Package, _target_version: &str) -> Result<UpdateResult> {
+        Ok(UpdateResult {
+            status: crate::backend::models::UpdateStatus::Failed,
+            error: Some("Rollback not implemented on Linux".to_string()),
+            duration: chrono::Duration::seconds(0),
+        })
+    }
+
+    async fn apply_package_update(&self, update: &PackageUpdate) -> Result<UpdateResult> {
+        let output = match update.package.manager {
             PackageManager::Apt => {
-                let output = Command::new("sudo")
-                    .args(["apt", "install", "--only-upgrade", "-y", &package.id])
-                    .output()?;
-
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(format!("Failed to update package: {}", stderr).into());
-                }
-
-                Ok(())
+                Command::new("sudo")
+                    .args(["apt", "install", "--only-upgrade", "-y", "-qq", &update.package.id])
+                    .output()?
             }
             PackageManager::Dnf => {
-                let output = Command::new("sudo")
-                    .args(["dnf", "upgrade", "-y", &package.id])
-                    .output()?;
-
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(format!("Failed to update package: {}", stderr).into());
-                }
-
-                Ok(())
+                Command::new("sudo")
+                    .args(["dnf", "upgrade", "-y", "-q", &update.package.id])
+                    .output()?
             }
             PackageManager::Pacman => {
-                let output = Command::new("sudo")
-                    .args(["pacman", "-S", "--noconfirm", &package.id])
-                    .output()?;
-
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(format!("Failed to update package: {}", stderr).into());
-                }
-
-                Ok(())
+                Command::new("sudo")
+                    .args(["pacman", "-S", "--noconfirm", "--quiet", &update.package.id])
+                    .output()?
             }
-            PackageManager::Unknown => {
-                Err("No supported package manager found".into())
+            PackageManager::Npm => {
+                Command::new("npm")
+                    .args(["install", "-g", "--silent", &format!("{}@latest", update.package.id)])
+                    .output()?
             }
+            _ => {
+                return Ok(UpdateResult {
+                    status: crate::backend::models::UpdateStatus::Failed,
+                    error: Some("Unsupported package manager on Linux".to_string()),
+                    duration: chrono::Duration::seconds(0),
+                })
+            }
+        };
+
+        if output.status.success() {
+            Ok(UpdateResult {
+                status: crate::backend::models::UpdateStatus::Completed,
+                error: None,
+                duration: chrono::Duration::seconds(0),
+            })
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Ok(UpdateResult {
+                status: crate::backend::models::UpdateStatus::Failed,
+                error: Some(stderr.to_string()),
+                duration: chrono::Duration::seconds(0),
+            })
         }
     }
 
-    async fn update_driver(&self, _driver: &Driver) -> Result<()> {
-        Err("Driver updates not supported on Linux".into())
+    async fn apply_driver_update(&self, _update: &DriverUpdate) -> Result<UpdateResult> {
+        Err(crate::backend::error::Error::NotImplemented)
+    }
+
+    async fn backup_driver(&self, _driver: &Driver) -> Result<PathBuf> {
+        Err(crate::backend::error::Error::NotImplemented)
+    }
+
+    async fn restore_driver(&self, _backup_path: &PathBuf) -> Result<()> {
+        Err(crate::backend::error::Error::NotImplemented)
+    }
+
+    fn requires_elevation(&self, _operation: &str) -> bool {
+        true
+    }
+
+    async fn request_elevation(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn get_package_details(&self, _package_id: &str) -> Result<Option<PackageDetails>> {
+        Ok(None)
     }
 }

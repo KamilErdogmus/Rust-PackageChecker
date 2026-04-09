@@ -38,6 +38,15 @@ async fn apply_update(update: scanner::UpdateInfo) -> Result<backend::models::Up
 }
 
 #[tauri::command]
+async fn rollback_update(package: backend::models::Package, target_version: String) -> Result<backend::models::UpdateResult, String> {
+    let adapter = create_platform_adapter();
+    // Assuming we add rollback to engine, or just call adapter directly here for simplicity
+    adapter.rollback_package(&package, &target_version)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn apply_batch_updates(updates: Vec<scanner::UpdateInfo>) -> Result<engine::BatchUpdateResult, String> {
     let adapter = create_platform_adapter();
     let engine = engine::UpdateEngine::new(adapter);
@@ -60,6 +69,7 @@ pub fn run() {
             scan_system,
             check_updates,
             apply_update,
+            rollback_update,
             apply_batch_updates
         ])
         .run(tauri::generate_context!())

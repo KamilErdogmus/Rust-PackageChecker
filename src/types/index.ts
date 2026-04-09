@@ -1,7 +1,7 @@
 // TypeScript type definitions for frontend
 
 export interface Platform {
-  type: 'Windows' | 'MacOS' | 'Linux';
+  type: "Windows" | "MacOS" | "Linux";
   version?: string;
 }
 
@@ -14,16 +14,19 @@ export interface Package {
   installed_date?: string;
 }
 
-export type PackageManager = 
-  | 'Winget' 
-  | 'Chocolatey' 
-  | 'Homebrew' 
-  | 'MacAppStore' 
-  | 'Apt' 
-  | 'Dnf' 
-  | 'Pacman' 
-  | 'Flatpak' 
-  | 'Snap';
+export type PackageManager =
+  | "Winget"
+  | "Chocolatey"
+  | "Scoop"
+  | "Npm"
+  | "Cargo"
+  | "Homebrew"
+  | "MacAppStore"
+  | "Apt"
+  | "Dnf"
+  | "Pacman"
+  | "Flatpak"
+  | "Snap";
 
 export interface Driver {
   id: string;
@@ -34,16 +37,16 @@ export interface Driver {
   driver_date?: string;
 }
 
-export type DeviceType = 
-  | 'Graphics' 
-  | 'Network' 
-  | 'Audio' 
-  | 'Storage' 
-  | 'Input' 
+export type DeviceType =
+  | "Graphics"
+  | "Network"
+  | "Audio"
+  | "Storage"
+  | "Input"
   | { Other: string };
 
 export interface Update {
-  type: 'Package' | 'Driver';
+  type: "Package" | "Driver";
   data: PackageUpdate | DriverUpdate;
 }
 
@@ -63,9 +66,9 @@ export interface DriverUpdate {
   release_notes?: string;
 }
 
-export type UpdatePriority = 'Critical' | 'Important' | 'Normal';
+export type UpdatePriority = "Critical" | "Important" | "Normal";
 
-export type UpdateStatus = 'Completed' | 'Failed' | 'RequiresReboot';
+export type UpdateStatus = "Completed" | "Failed" | "RequiresReboot";
 
 // Scanner types
 export interface ScanResult {
@@ -74,9 +77,7 @@ export interface ScanResult {
   drivers: Driver[];
 }
 
-export type UpdateInfo = 
-  | { Package: PackageUpdate }
-  | { Driver: DriverUpdate };
+export type UpdateInfo = { Package: PackageUpdate } | { Driver: DriverUpdate };
 
 export interface UpdateResult {
   status: UpdateStatus;
@@ -109,16 +110,16 @@ export interface PackageDetails {
   category: PackageCategory;
 }
 
-export type PackageCategory = 
-  | 'Development' 
-  | 'System' 
-  | 'Media' 
-  | 'Productivity' 
-  | 'Gaming' 
-  | 'Security' 
-  | 'Network' 
-  | 'Database' 
-  | 'Other';
+export type PackageCategory =
+  | "Development"
+  | "System"
+  | "Media"
+  | "Productivity"
+  | "Gaming"
+  | "Security"
+  | "Network"
+  | "Database"
+  | "Other";
 
 // Update history
 export interface UpdateHistoryEntry {
@@ -127,7 +128,7 @@ export interface UpdateHistoryEntry {
   old_version: string;
   new_version: string;
   timestamp: string;
-  status: 'Success' | 'Failed' | 'Rollback';
+  status: "Success" | "Failed" | "Rollback";
+  manager: PackageManager;
   error_message?: string;
 }
-
