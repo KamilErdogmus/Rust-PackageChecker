@@ -1,10 +1,10 @@
 [package]
 name = "system-update-manager"
-version = "0.1.0"
+version = "1.0.0"
 description = "Cross-platform system update manager for Windows, macOS, and Linux"
 authors = ["System Update Manager Team"]
 edition = "2024"
-rust-version = "1.94.0"
+rust-version = "1.94.1"
 
 [lib]
 name = "system_update_manager_lib"
@@ -33,10 +33,7 @@ tauri-plugin-opener = "2.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.51", features = ["full", "tracing"] }
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.22", features = ["v4", "serde"] }
-anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -46,4 +43,3 @@ async-trait = "0.1"
 proptest = "1.11"
 tokio-test = "0.4"
 mockall = "0.14"
-

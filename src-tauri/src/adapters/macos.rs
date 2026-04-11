@@ -74,7 +74,7 @@ impl MacOSAdapter {
 #[async_trait]
 impl PlatformAdapter for MacOSAdapter {
     fn detect_platform(&self) -> Platform {
-        Platform::MacOS
+        Platform::MacOS(crate::backend::models::MacOSVersion::Sonoma)
     }
 
     fn get_package_managers(&self) -> Vec<PackageManager> {

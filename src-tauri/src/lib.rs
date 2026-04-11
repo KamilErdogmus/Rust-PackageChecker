@@ -8,6 +8,14 @@ use adapters::create_platform_adapter;
 
 // Tauri commands
 #[tauri::command]
+async fn get_installed_package_managers() -> Result<Vec<String>, String> {
+    let adapter = create_platform_adapter();
+    let managers = adapter.get_package_managers();
+    let names = managers.iter().map(|m| format!("{:?}", m)).collect();
+    Ok(names)
+}
+
+#[tauri::command]
 async fn scan_system() -> Result<scanner::ScanResult, String> {
     let adapter = create_platform_adapter();
     let scanner = scanner::UpdateScanner::new(adapter);
@@ -66,6 +74,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            get_installed_package_managers,
             scan_system,
             check_updates,
             apply_update,

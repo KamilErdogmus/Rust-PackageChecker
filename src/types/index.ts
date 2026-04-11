@@ -20,6 +20,8 @@ export type PackageManager =
   | "Scoop"
   | "Npm"
   | "Cargo"
+  | "Gem"
+  | "Pip"
   | "Homebrew"
   | "MacAppStore"
   | "Apt"

@@ -1,14 +1,7 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::Duration;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::{Driver, Package};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Update {
-    Package(PackageUpdate),
-    Driver(DriverUpdate),
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageUpdate {
@@ -47,22 +40,4 @@ pub enum UpdateStatus {
     Completed,
     Failed,
     RequiresReboot,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateRecord {
-    pub id: Uuid,
-    pub timestamp: DateTime<Utc>,
-    pub update_type: UpdateType,
-    pub package_name: String,
-    pub old_version: String,
-    pub new_version: String,
-    pub status: UpdateStatus,
-    pub error_message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum UpdateType {
-    Package,
-    Driver,
 }

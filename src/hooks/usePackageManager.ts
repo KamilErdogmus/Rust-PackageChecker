@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import type {
@@ -29,6 +29,13 @@ export function usePackageManager() {
     "All",
   );
   const [sortBy, setSortBy] = useState<"name" | "size" | "priority">("name");
+  const [installedManagers, setInstalledManagers] = useState<string[]>([]);
+
+  useEffect(() => {
+    invoke<string[]>("get_installed_package_managers")
+      .then((managers) => setInstalledManagers(managers))
+      .catch(() => setInstalledManagers([]));
+  }, []);
 
   const getUpdateName = (update: UpdateInfo): string => {
     if ("Package" in update) return update.Package.package.name;
@@ -363,6 +370,7 @@ export function usePackageManager() {
     sortBy,
     setSortBy,
     filteredUpdates,
+    installedManagers,
 
     handleCheckUpdates,
     handleUpdateSingle,

@@ -3,116 +3,38 @@ use std::process::Command;
 use std::path::PathBuf;
 use crate::backend::{
     error::Result,
-    models::{Driver, DriverUpdate, Package, PackageManager, PackageUpdate, Platform, UpdateResult, PackageDetails, PackageCategory},
+    models::{Driver, DriverUpdate, Package, PackageManager, PackageUpdate, Platform, UpdateResult, PackageDetails, LinuxDistro},
 };
 use super::platform_adapter::PlatformAdapter;
 
-pub struct LinuxAdapter {
-    package_manager: PackageManager,
-}
-
-#[derive(Debug, Clone)]
-enum PackageManager {
-    Apt,
-    Dnf,
-    Pacman,
-    Unknown,
-}
+pub struct LinuxAdapter;
 
 impl LinuxAdapter {
     pub fn new() -> Self {
-        let package_manager = Self::detect_package_manager();
-        Self { package_manager }
+        Self
     }
 
-    fn detect_package_manager() -> PackageManager {
-        if Command::new("apt").arg("--version").output().is_ok() {
-            PackageManager::Apt
-        } else if Command::new("dnf").arg("--version").output().is_ok() {
-            PackageManager::Dnf
-        } else if Command::new("pacman").arg("--version").output().is_ok() {
-            PackageManager::Pacman
+    fn detect_system_package_manager() -> Option<PackageManager> {
+        if Command::new("apt").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+            Some(PackageManager::Apt)
+        } else if Command::new("dnf").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+            Some(PackageManager::Dnf)
+        } else if Command::new("pacman").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+            Some(PackageManager::Pacman)
         } else {
-            PackageManager::Unknown
+            None
         }
     }
 
-    fn parse_apt_list(&self, output: &str) -> Vec<Package> {
-        output
-            .lines()
-            .filter(|line| line.starts_with("Listing...") == false && !line.trim().is_empty())
-            .filter_map(|line| {
-                let parts: Vec<&str> = line.split('/').collect();
-                if parts.is_empty() {
-                    return None;
-                }
-                
-                let name_version: Vec<&str> = parts[0].split_whitespace().collect();
-                let name = name_version.first()?.to_string();                
-                // Extract version from the line
-                let version = if let Some(version_part) = line.split_whitespace().nth(1) {
-                    version_part.to_string()
-                } else {
-                    "unknown".to_string()
-                };
-
-                Some(Package {
-                    id: name.clone(),
-                    name,
-                    version,
-                    platform: Platform::Linux,
-                })
-            })
-            .collect()
+    fn is_command_available(cmd: &str) -> bool {
+        Command::new("which")
+            .arg(cmd)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
-    fn parse_dnf_list(&self, output: &str) -> Vec<Package> {
-        output
-            .lines()
-            .filter(|line| !line.trim().is_empty() && !line.starts_with("Installed Packages"))
-            .filter_map(|line| {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() < 2 {
-                    return None;
-                }
-                
-                let name = parts[0].split('.').next()?.to_string();
-                let version = parts[1].to_string();
-
-                Some(Package {
-                    id: name.clone(),
-                    name,
-                    version,
-                    platform: Platform::Linux,
-                })
-            })
-            .collect()
-    }
-
-    fn parse_pacman_list(&self, output: &str) -> Vec<Package> {
-        output
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() < 2 {
-                    return None;
-                }
-                
-                let name = parts[0].to_string();
-                let version = parts[1].to_string();
-
-                Some(Package {
-                    id: name.clone(),
-                    name,
-                    version,
-                    platform: Platform::Linux,
-                })
-            })
-            .collect()
-    }
-
-    fn parse_apt_upgradable(&self, output: &str) -> Vec<(String, String)> {
+    fn parse_apt_list(output: &str) -> Vec<Package> {
         output
             .lines()
             .filter(|line| !line.starts_with("Listing...") && !line.trim().is_empty())
@@ -121,52 +43,65 @@ impl LinuxAdapter {
                 if parts.is_empty() {
                     return None;
                 }
-                
                 let name = parts[0].trim().to_string();
-                
-                // Extract new version from brackets [version]
-                if let Some(bracket_start) = line.find('[') {
-                    if let Some(bracket_end) = line.find(']') {
-                        let new_version = line[bracket_start + 1..bracket_end].trim().to_string();
-                        return Some((name, new_version));
-                    }
+                let version = line.split_whitespace().nth(1).unwrap_or("unknown").to_string();
+                if name.is_empty() {
+                    return None;
                 }
-                
-                None
+                Some(Package {
+                    id: name.clone(),
+                    name,
+                    version,
+                    manager: PackageManager::Apt,
+                    description: None,
+                    installed_date: None,
+                })
             })
             .collect()
     }
 
-    fn parse_dnf_check_update(&self, output: &str) -> Vec<(String, String)> {
+    fn parse_dnf_list(output: &str) -> Vec<Package> {
         output
             .lines()
-            .filter(|line| !line.trim().is_empty() && !line.contains("Last metadata"))
+            .filter(|line| !line.trim().is_empty() && !line.starts_with("Installed Packages"))
             .filter_map(|line| {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() < 2 {
                     return None;
                 }
-                
                 let name = parts[0].split('.').next()?.to_string();
-                let new_version = parts[1].to_string();
-                Some((name, new_version))
+                let version = parts[1].to_string();
+                Some(Package {
+                    id: name.clone(),
+                    name,
+                    version,
+                    manager: PackageManager::Dnf,
+                    description: None,
+                    installed_date: None,
+                })
             })
             .collect()
     }
 
-    fn parse_pacman_updates(&self, output: &str) -> Vec<(String, String)> {
+    fn parse_pacman_list(output: &str) -> Vec<Package> {
         output
             .lines()
             .filter(|line| !line.trim().is_empty())
             .filter_map(|line| {
                 let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() < 4 {
+                if parts.len() < 2 {
                     return None;
                 }
-                
                 let name = parts[0].to_string();
-                let new_version = parts[3].to_string();
-                Some((name, new_version))
+                let version = parts[1].to_string();
+                Some(Package {
+                    id: name.clone(),
+                    name,
+                    version,
+                    manager: PackageManager::Pacman,
+                    description: None,
+                    installed_date: None,
+                })
             })
             .collect()
     }
@@ -174,9 +109,30 @@ impl LinuxAdapter {
 
 #[async_trait]
 impl PlatformAdapter for LinuxAdapter {
+    fn detect_platform(&self) -> Platform {
+        Platform::Linux(LinuxDistro::Other("Linux".to_string()))
+    }
+
     fn get_package_managers(&self) -> Vec<PackageManager> {
-        let mut managers = vec![self.package_manager.clone()];
-        managers.push(PackageManager::Npm);
+        let mut managers = Vec::new();
+        if let Some(sys_pm) = Self::detect_system_package_manager() {
+            managers.push(sys_pm);
+        }
+        if Self::is_command_available("flatpak") {
+            managers.push(PackageManager::Flatpak);
+        }
+        if Self::is_command_available("snap") {
+            managers.push(PackageManager::Snap);
+        }
+        if Self::is_command_available("npm") {
+            managers.push(PackageManager::Npm);
+        }
+        if Self::is_command_available("pip") || Self::is_command_available("pip3") {
+            managers.push(PackageManager::Pip);
+        }
+        if Self::is_command_available("gem") {
+            managers.push(PackageManager::Gem);
+        }
         managers
     }
 
@@ -185,21 +141,21 @@ impl PlatformAdapter for LinuxAdapter {
             PackageManager::Apt => {
                 if let Ok(output) = Command::new("apt").args(["list", "--installed"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    return Ok(self.parse_apt_list(&stdout));
+                    return Ok(Self::parse_apt_list(&stdout));
                 }
                 Ok(Vec::new())
             }
             PackageManager::Dnf => {
                 if let Ok(output) = Command::new("dnf").args(["list", "installed"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    return Ok(self.parse_dnf_list(&stdout));
+                    return Ok(Self::parse_dnf_list(&stdout));
                 }
                 Ok(Vec::new())
             }
             PackageManager::Pacman => {
                 if let Ok(output) = Command::new("pacman").args(["-Q"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    return Ok(self.parse_pacman_list(&stdout));
+                    return Ok(Self::parse_pacman_list(&stdout));
                 }
                 Ok(Vec::new())
             }
@@ -227,31 +183,96 @@ impl PlatformAdapter for LinuxAdapter {
                 }
                 Ok(Vec::new())
             }
+            PackageManager::Pip => {
+                let pip_cmd = if Self::is_command_available("pip3") { "pip3" } else { "pip" };
+                if let Ok(output) = Command::new(pip_cmd).args(&["list", "--format=json"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&stdout) {
+                        let mut packages = Vec::new();
+                        for item in arr {
+                            if let (Some(name), Some(version)) = (
+                                item.get("name").and_then(|v| v.as_str()),
+                                item.get("version").and_then(|v| v.as_str()),
+                            ) {
+                                packages.push(Package {
+                                    id: name.to_string(),
+                                    name: name.to_string(),
+                                    version: version.to_string(),
+                                    manager: PackageManager::Pip,
+                                    description: None,
+                                    installed_date: None,
+                                });
+                            }
+                        }
+                        return Ok(packages);
+                    }
+                }
+                Ok(Vec::new())
+            }
+            PackageManager::Gem => {
+                if let Ok(output) = Command::new("gem").args(&["list", "--local"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let mut packages = Vec::new();
+                    for line in stdout.lines() {
+                        let line = line.trim();
+                        if line.is_empty() || line.starts_with("***") {
+                            continue;
+                        }
+                        if let Some(paren_pos) = line.find('(') {
+                            let name = line[..paren_pos].trim().to_string();
+                            let version = line[paren_pos + 1..]
+                                .trim_end_matches(')')
+                                .split(',')
+                                .next()
+                                .unwrap_or("unknown")
+                                .trim()
+                                .to_string();
+                            if !name.is_empty() {
+                                packages.push(Package {
+                                    id: name.clone(),
+                                    name,
+                                    version,
+                                    manager: PackageManager::Gem,
+                                    description: None,
+                                    installed_date: None,
+                                });
+                            }
+                        }
+                    }
+                    return Ok(packages);
+                }
+                Ok(Vec::new())
+            }
             _ => Ok(Vec::new()),
         }
     }
 
     async fn scan_drivers(&self) -> Result<Vec<Driver>> {
-        // Linux driver management is complex and varies by distribution
-        // For now, return empty - can be extended with fwupd support
         Ok(Vec::new())
     }
 
-    async fn check_package_updates(&self, packages: &[Package]) -> Result<Vec<PackageUpdate>> {
+    async fn check_package_updates(&self, _packages: &[Package]) -> Result<Vec<PackageUpdate>> {
         let mut updates = Vec::new();
 
-        // System PM
-        match self.package_manager {
-            PackageManager::Apt => {
-                if let Ok(output) = Command::new("apt").args(["list", "--upgradable"]).output() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let upgradable = self.parse_apt_upgradable(&stdout);
-                    for (pkg_name, new_version) in upgradable {
+        // Apt
+        if Self::is_command_available("apt") {
+            if let Ok(output) = Command::new("apt").args(["list", "--upgradable"]).output() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if line.starts_with("Listing...") || line.trim().is_empty() {
+                        continue;
+                    }
+                    let parts: Vec<&str> = line.split('/').collect();
+                    if parts.is_empty() { continue; }
+                    let name = parts[0].trim().to_string();
+                    // new version inside brackets
+                    if let (Some(b), Some(e)) = (line.find('['), line.find(']')) {
+                        let new_version = line[b + 1..e].trim().to_string();
                         updates.push(PackageUpdate {
                             package: Package {
-                                id: pkg_name.clone(),
-                                name: pkg_name,
-                                version: "unknown".to_string(), // In real app, match from packages
+                                id: name.clone(),
+                                name,
+                                version: "unknown".to_string(),
                                 manager: PackageManager::Apt,
                                 description: None,
                                 installed_date: None,
@@ -264,38 +285,54 @@ impl PlatformAdapter for LinuxAdapter {
                     }
                 }
             }
-            PackageManager::Dnf => {
-                if let Ok(output) = Command::new("dnf").args(["check-update"]).output() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let upgradable = self.parse_dnf_check_update(&stdout);
-                    for (pkg_name, new_version) in upgradable {
-                        updates.push(PackageUpdate {
-                            package: Package {
-                                id: pkg_name.clone(),
-                                name: pkg_name,
-                                version: "unknown".to_string(),
-                                manager: PackageManager::Dnf,
-                                description: None,
-                                installed_date: None,
-                            },
-                            new_version,
-                            size_bytes: None,
-                            priority: crate::backend::models::UpdatePriority::Normal,
-                            changelog: None,
-                        });
+        }
+
+        // Dnf
+        if Self::is_command_available("dnf") {
+            if let Ok(output) = Command::new("dnf").args(["check-update"]).output() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if line.trim().is_empty() || line.contains("Last metadata") { continue; }
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let name = parts[0].split('.').next().unwrap_or("").to_string();
+                        let new_version = parts[1].to_string();
+                        if !name.is_empty() {
+                            updates.push(PackageUpdate {
+                                package: Package {
+                                    id: name.clone(),
+                                    name,
+                                    version: "unknown".to_string(),
+                                    manager: PackageManager::Dnf,
+                                    description: None,
+                                    installed_date: None,
+                                },
+                                new_version,
+                                size_bytes: None,
+                                priority: crate::backend::models::UpdatePriority::Normal,
+                                changelog: None,
+                            });
+                        }
                     }
                 }
             }
-            PackageManager::Pacman => {
-                if let Ok(output) = Command::new("pacman").args(["-Qu"]).output() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let upgradable = self.parse_pacman_updates(&stdout);
-                    for (pkg_name, new_version) in upgradable {
+        }
+
+        // Pacman
+        if Self::is_command_available("pacman") {
+            if let Ok(output) = Command::new("pacman").args(["-Qu"]).output() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if line.trim().is_empty() { continue; }
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 4 {
+                        let name = parts[0].to_string();
+                        let new_version = parts[3].to_string();
                         updates.push(PackageUpdate {
                             package: Package {
-                                id: pkg_name.clone(),
-                                name: pkg_name,
-                                version: "unknown".to_string(),
+                                id: name.clone(),
+                                name,
+                                version: parts[1].to_string(),
                                 manager: PackageManager::Pacman,
                                 description: None,
                                 installed_date: None,
@@ -308,34 +345,35 @@ impl PlatformAdapter for LinuxAdapter {
                     }
                 }
             }
-            _ => {}
         }
 
         // NPM
-        if let Ok(output) = Command::new("npm").args(&["outdated", "-g", "--json"]).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
-                if let Some(deps) = json.as_object() {
-                    for (name, info) in deps {
-                        if let (Some(current), Some(latest)) = (
-                            info.get("current").and_then(|v| v.as_str()),
-                            info.get("latest").and_then(|v| v.as_str())
-                        ) {
-                            if current != latest {
-                                updates.push(PackageUpdate {
-                                    package: Package {
-                                        id: name.clone(),
-                                        name: name.clone(),
-                                        version: current.to_string(),
-                                        manager: PackageManager::Npm,
-                                        description: None,
-                                        installed_date: None,
-                                    },
-                                    new_version: latest.to_string(),
-                                    size_bytes: None,
-                                    priority: crate::backend::models::UpdatePriority::Normal,
-                                    changelog: None,
-                                });
+        if Self::is_command_available("npm") {
+            if let Ok(output) = Command::new("npm").args(&["outdated", "-g", "--json"]).output() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                    if let Some(deps) = json.as_object() {
+                        for (name, info) in deps {
+                            if let (Some(current), Some(latest)) = (
+                                info.get("current").and_then(|v| v.as_str()),
+                                info.get("latest").and_then(|v| v.as_str())
+                            ) {
+                                if current != latest {
+                                    updates.push(PackageUpdate {
+                                        package: Package {
+                                            id: name.clone(),
+                                            name: name.clone(),
+                                            version: current.to_string(),
+                                            manager: PackageManager::Npm,
+                                            description: None,
+                                            installed_date: None,
+                                        },
+                                        new_version: latest.to_string(),
+                                        size_bytes: None,
+                                        priority: crate::backend::models::UpdatePriority::Normal,
+                                        changelog: None,
+                                    });
+                                }
                             }
                         }
                     }
@@ -346,14 +384,14 @@ impl PlatformAdapter for LinuxAdapter {
         Ok(updates)
     }
 
-    async fn check_driver_updates(&self, _drivers: &[Driver]) -> Result<Vec<(Driver, String)>> {
+    async fn check_driver_updates(&self, _drivers: &[Driver]) -> Result<Vec<DriverUpdate>> {
         Ok(Vec::new())
     }
 
     async fn rollback_package(&self, _package: &Package, _target_version: &str) -> Result<UpdateResult> {
         Ok(UpdateResult {
             status: crate::backend::models::UpdateStatus::Failed,
-            error: Some("Rollback not implemented on Linux".to_string()),
+            error: Some("Rollback not supported on Linux".to_string()),
             duration: chrono::Duration::seconds(0),
         })
     }
@@ -380,6 +418,17 @@ impl PlatformAdapter for LinuxAdapter {
                     .args(["install", "-g", "--silent", &format!("{}@latest", update.package.id)])
                     .output()?
             }
+            PackageManager::Pip => {
+                let pip_cmd = if Self::is_command_available("pip3") { "pip3" } else { "pip" };
+                Command::new(pip_cmd)
+                    .args(["install", "--upgrade", &update.package.id])
+                    .output()?
+            }
+            PackageManager::Gem => {
+                Command::new("gem")
+                    .args(["update", &update.package.id])
+                    .output()?
+            }
             _ => {
                 return Ok(UpdateResult {
                     status: crate::backend::models::UpdateStatus::Failed,
@@ -396,10 +445,10 @@ impl PlatformAdapter for LinuxAdapter {
                 duration: chrono::Duration::seconds(0),
             })
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             Ok(UpdateResult {
                 status: crate::backend::models::UpdateStatus::Failed,
-                error: Some(stderr.to_string()),
+                error: Some(stderr),
                 duration: chrono::Duration::seconds(0),
             })
         }

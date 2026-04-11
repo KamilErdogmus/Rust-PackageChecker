@@ -11,6 +11,8 @@ pub enum PackageManager {
     // Cross-platform
     Npm,
     Cargo,
+    Gem,    // Ruby
+    Pip,    // Python
     
     // macOS
     Homebrew,

@@ -43,30 +43,3 @@ pub enum Error {
     #[error("Not implemented")]
     NotImplemented,
 }
-
-impl Error {
-    pub fn is_critical(&self) -> bool {
-        matches!(
-            self,
-            Error::PlatformDetectionFailed(_) | Error::PermissionDenied | Error::DatabaseError(_)
-        )
-    }
-    
-    pub fn user_message(&self) -> String {
-        match self {
-            Error::PlatformDetectionFailed(_) => "Platform could not be detected".to_string(),
-            Error::PackageManagerNotFound(pm) => format!("Package manager '{}' not found", pm),
-            Error::UnsupportedPackageManager => "This package manager is not supported".to_string(),
-            Error::ScanFailed(_) => "System scan failed".to_string(),
-            Error::UpdateFailed(_) => "Update failed".to_string(),
-            Error::DriverOperationFailed(_) => "Driver operation failed".to_string(),
-            Error::PermissionDenied => "Permission denied. Administrator privileges required".to_string(),
-            Error::NetworkError(_) => "Network connection error".to_string(),
-            Error::DatabaseError(_) => "Database error occurred".to_string(),
-            Error::IoError(_) => "File system error occurred".to_string(),
-            Error::SerializationError(_) => "Data serialization error".to_string(),
-            Error::Other(msg) => msg.clone(),
-            Error::NotImplemented => "This feature is not yet implemented".to_string(),
-        }
-    }
-}

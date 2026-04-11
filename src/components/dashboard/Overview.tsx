@@ -4,6 +4,7 @@ import {
   Package,
   RefreshCw,
   DownloadCloud,
+  Box,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -14,6 +15,79 @@ interface OverviewProps {
   goToUpdates: () => void;
 }
 
+const PM_META: Record<string, { label: string; color: string; bg: string }> = {
+  Winget: {
+    label: "Winget",
+    color: "text-blue-400",
+    bg: "bg-blue-500/10 border-blue-500/20",
+  },
+  Chocolatey: {
+    label: "Chocolatey",
+    color: "text-orange-400",
+    bg: "bg-orange-500/10 border-orange-500/20",
+  },
+  Scoop: {
+    label: "Scoop",
+    color: "text-cyan-400",
+    bg: "bg-cyan-500/10 border-cyan-500/20",
+  },
+  Npm: {
+    label: "npm",
+    color: "text-red-400",
+    bg: "bg-red-500/10 border-red-500/20",
+  },
+  Cargo: {
+    label: "Cargo",
+    color: "text-amber-400",
+    bg: "bg-amber-500/10 border-amber-500/20",
+  },
+  Gem: {
+    label: "gem",
+    color: "text-rose-400",
+    bg: "bg-rose-500/10 border-rose-500/20",
+  },
+  Pip: {
+    label: "pip",
+    color: "text-yellow-400",
+    bg: "bg-yellow-500/10 border-yellow-500/20",
+  },
+  Homebrew: {
+    label: "Homebrew",
+    color: "text-amber-300",
+    bg: "bg-amber-500/10 border-amber-500/20",
+  },
+  MacAppStore: {
+    label: "App Store",
+    color: "text-blue-300",
+    bg: "bg-blue-500/10 border-blue-500/20",
+  },
+  Apt: {
+    label: "apt",
+    color: "text-green-400",
+    bg: "bg-green-500/10 border-green-500/20",
+  },
+  Dnf: {
+    label: "dnf",
+    color: "text-blue-400",
+    bg: "bg-blue-500/10 border-blue-500/20",
+  },
+  Pacman: {
+    label: "pacman",
+    color: "text-teal-400",
+    bg: "bg-teal-500/10 border-teal-500/20",
+  },
+  Flatpak: {
+    label: "Flatpak",
+    color: "text-indigo-400",
+    bg: "bg-indigo-500/10 border-indigo-500/20",
+  },
+  Snap: {
+    label: "Snap",
+    color: "text-orange-300",
+    bg: "bg-orange-500/10 border-orange-500/20",
+  },
+};
+
 export function Overview({ manager, goToUpdates }: OverviewProps) {
   const {
     scanResult,
@@ -21,6 +95,7 @@ export function Overview({ manager, goToUpdates }: OverviewProps) {
     isCheckingUpdates,
     handleCheckUpdates,
     hasCheckedUpdates,
+    installedManagers,
   } = manager;
 
   return (
@@ -182,6 +257,41 @@ export function Overview({ manager, goToUpdates }: OverviewProps) {
           </Card>
         </div>
       )}
+
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Box className="w-4 h-4 text-zinc-500" />
+          <h3 className="text-sm font-semibold tracking-wider uppercase text-zinc-500">
+            Detected Package Managers
+          </h3>
+        </div>
+        {installedManagers.length === 0 ? (
+          <Card className="p-4">
+            <p className="text-sm text-zinc-500">
+              No package managers detected yet. Run a scan to check.
+            </p>
+          </Card>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {installedManagers.map((pm: string) => {
+              const meta = PM_META[pm] ?? {
+                label: pm,
+                color: "text-zinc-300",
+                bg: "bg-zinc-800 border-zinc-700",
+              };
+              return (
+                <span
+                  key={pm}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold ${meta.color} ${meta.bg}`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
+                  {meta.label}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
