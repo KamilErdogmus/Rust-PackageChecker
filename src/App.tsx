@@ -55,17 +55,17 @@ function App() {
   ];
 
   return (
-    <div className="flex flex-col w-screen h-screen overflow-hidden font-sans bg-zinc-950 text-zinc-200">
+    <div className="flex flex-col w-screen h-screen overflow-hidden font-sans bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-200">
       {/* Top Navbar */}
-      <header className="flex-shrink-0 border-b border-zinc-800 bg-zinc-900">
+      <header className="flex-shrink-0 bg-white border-b border-zinc-200 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="px-6 sm:px-10 lg:px-16">
           <div className="flex items-center justify-between max-w-5xl mx-auto h-14">
             {/* Logo */}
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-8 h-8 border rounded-lg bg-zinc-800 border-zinc-700">
-                <Layers className="w-4 h-4 text-zinc-300" />
+              <div className="flex items-center justify-center w-8 h-8 border rounded-lg bg-zinc-100 border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700">
+                <Layers className="w-4 h-4 text-zinc-500 dark:text-zinc-300" />
               </div>
-              <span className="hidden text-sm font-semibold tracking-tight text-zinc-100 sm:block">
+              <span className="hidden text-sm font-semibold tracking-tight text-zinc-800 sm:block dark:text-zinc-100">
                 Package Checker
               </span>
             </div>
@@ -82,8 +82,8 @@ function App() {
                     onClick={() => setActiveTab(item.id)}
                     className={`group relative flex items-center h-full gap-2 px-3 text-sm font-medium transition-colors ${
                       isActive
-                        ? "text-zinc-100"
-                        : "text-zinc-500 hover:text-zinc-300"
+                        ? "text-zinc-900 dark:text-zinc-100"
+                        : "text-zinc-400 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300"
                     }`}
                   >
                     <Icon className="w-4 h-4" />
@@ -92,15 +92,15 @@ function App() {
                       <span
                         className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-xs font-bold rounded-full ${
                           isActive
-                            ? "bg-zinc-700 text-zinc-100"
-                            : "bg-zinc-800 text-zinc-400"
+                            ? "bg-zinc-200 text-zinc-900 dark:bg-zinc-700 dark:text-zinc-100"
+                            : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
                         }`}
                       >
                         {item.badge}
                       </span>
                     )}
                     {isActive && (
-                      <span className="absolute bottom-0 left-0 right-0 h-px bg-zinc-100" />
+                      <span className="absolute bottom-0 left-0 right-0 h-px bg-zinc-900 dark:bg-zinc-100" />
                     )}
                   </button>
                 );
@@ -110,7 +110,7 @@ function App() {
         </div>
       </header>
 
-      <main className="flex-1 min-h-0 overflow-y-auto">
+      <main className="flex-1 min-h-0 overflow-y-auto bg-zinc-50 dark:bg-zinc-950">
         <div className="px-6 py-8 sm:px-10 lg:px-16 lg:py-12">
           <div className="max-w-5xl mx-auto">{renderContent()}</div>
         </div>
