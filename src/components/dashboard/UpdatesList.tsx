@@ -24,8 +24,6 @@ export function UpdatesList({ manager }: UpdatesListProps) {
     selectedUpdates,
     searchQuery,
     setSearchQuery,
-    categoryFilter,
-    setCategoryFilter,
     sortBy,
     setSortBy,
     handleUpdateSingle,
@@ -77,22 +75,6 @@ export function UpdatesList({ manager }: UpdatesListProps) {
           />
         </div>
         <div className="flex gap-3">
-          <div className="relative flex-1 min-w-[140px]">
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="w-full py-0 pl-3 pr-8 text-sm border rounded-lg appearance-none h-9 border-zinc-200 bg-zinc-50 focus:outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:focus:border-zinc-600 dark:focus:ring-zinc-600 dark:text-zinc-300"
-            >
-              <option value="All">All Categories</option>
-              <option value="Development">Development</option>
-              <option value="System">System</option>
-              <option value="Media">Media</option>
-              <option value="Productivity">Productivity</option>
-              <option value="Gaming">Gaming</option>
-              <option value="Other">Other</option>
-            </select>
-            <SlidersHorizontal className="absolute w-3.5 h-3.5 -translate-y-1/2 pointer-events-none right-2.5 top-1/2 text-zinc-400 dark:text-zinc-600" />
-          </div>
           <div className="relative flex-1 min-w-[130px]">
             <select
               value={sortBy}

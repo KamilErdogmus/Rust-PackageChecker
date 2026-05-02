@@ -109,19 +109,7 @@ export interface PackageDetails {
   install_date?: string;
   size?: string;
   homepage?: string;
-  category: PackageCategory;
 }
-
-export type PackageCategory =
-  | "Development"
-  | "System"
-  | "Media"
-  | "Productivity"
-  | "Gaming"
-  | "Security"
-  | "Network"
-  | "Database"
-  | "Other";
 
 // Update history
 export interface UpdateHistoryEntry {

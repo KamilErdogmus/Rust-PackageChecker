@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::process::Command;
 use crate::backend::{
     error::Result,
-    models::{Driver, DriverUpdate, Package, PackageManager, PackageUpdate, Platform, UpdateResult, PackageDetails, PackageCategory},
+    models::{Driver, DriverUpdate, Package, PackageManager, PackageUpdate, Platform, UpdateResult, PackageDetails},
 };
 use super::platform_adapter::PlatformAdapter;
 
@@ -31,49 +31,106 @@ impl WindowsAdapter {
     }
 
     fn is_command_available(cmd: &str) -> bool {
+        if cmd == "winget" {
+            return Self::winget_available();
+        }
         Self::silent_cmd()
-            .args(&["/C", &format!("where {}", cmd)])
+            .args(&["/C", &format!("{} --version", cmd)])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
     }
 
+    fn winget_available() -> bool {
+        let ps_cmd = r#"$p=(Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller').InstallLocation+'\winget.exe'; if(Test-Path $p){'ok'}"#;
+        let mut c = Command::new("powershell");
+        c.args(&["-NoProfile", "-NonInteractive", "-Command", ps_cmd])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
+        c.output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "ok")
+            .unwrap_or(false)
+    }
+
+    fn run_winget(args: &[&str]) -> std::io::Result<std::process::Output> {
+        let args_str = args.iter()
+            .map(|a| if a.contains(' ') { format!("'{}'", a) } else { a.to_string() })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let ps_cmd = format!(
+            r#"$p=(Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller').InstallLocation+'\winget.exe'; & $p {}"#,
+            args_str
+        );
+        let mut c = Command::new("powershell");
+        c.args(&["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
+        c.output()
+    }
+
+    
+
     fn parse_winget_list(&self, output: &str) -> Vec<Package> {
         let mut packages = Vec::new();
-        let lines: Vec<&str> = output.lines().collect();
+        let normalized = output.replace("\r\n", "\n").replace('\r', "\n");
+        let lines: Vec<&str> = normalized.lines().filter(|l| !l.trim().is_empty()).collect();
 
+        let mut header_info: Option<(usize, usize)> = None;
         let mut dash_idx = None;
+        let mut found_header = false;
+
         for (i, line) in lines.iter().enumerate() {
-            let dash_count = line.chars().filter(|&c| c == '-').count();
-            if dash_count > 20 {
-                dash_idx = Some(i);
-                break;
+            let clean = Self::clean_ansi(line);
+            let lower = clean.to_lowercase();
+            if !found_header && lower.contains("name") && lower.contains("version") {
+                let id_col = Self::find_column_offset(&clean, "Id");
+                let version_col = Self::find_column_offset(&clean, "Version");
+                if let (Some(id_c), Some(ver_c)) = (id_col, version_col) {
+                    if id_c > 0 && ver_c > id_c {
+                        header_info = Some((id_c, ver_c));
+                        found_header = true;
+                    }
+                }
+                continue;
+            }
+            if found_header {
+                let clean2 = Self::clean_ansi(line);
+                let dash_count = clean2.chars().filter(|&c| c == '-').count();
+                if dash_count > 20 {
+                    dash_idx = Some(i);
+                    break;
+                }
             }
         }
 
-        if let Some(idx) = dash_idx {
-            for line in lines.iter().skip(idx + 1) {
-                if line.trim().is_empty() {
+        if let (Some((id_col, version_col)), Some(dash_line_idx)) = (header_info, dash_idx) {
+            for line in lines.iter().skip(dash_line_idx + 1) {
+                let clean = Self::clean_ansi(line);
+                if clean.trim().is_empty() {
                     continue;
                 }
 
-                let cols: Vec<&str> = line.split("  ")
-                    .flat_map(|s| s.split('\t'))
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-
-                if cols.len() < 2 {
+                if clean.len() < version_col {
                     continue;
                 }
 
-                let name = cols[0].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
-                let id = cols[1].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
-                let version = if cols.len() > 2 {
-                    cols[2].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string()
-                } else {
-                    "unknown".to_string()
-                };
+                if !clean.is_char_boundary(id_col) || !clean.is_char_boundary(version_col) {
+                    continue;
+                }
+
+                let name = clean[..id_col].trim().to_string();
+                let id = clean[id_col..version_col].trim().to_string();
+                let version = clean[version_col..].split_whitespace().next().unwrap_or("unknown").trim().to_string();
 
                 if id.to_lowercase().contains("packages") || name.to_lowercase().contains("source requires") || name.contains("---") {
                     continue;
@@ -90,18 +147,187 @@ impl WindowsAdapter {
                     });
                 }
             }
+        } else {
+            let mut dash_idx2 = None;
+            for (i, line) in lines.iter().enumerate() {
+                let clean = Self::clean_ansi(line);
+                let dash_count = clean.chars().filter(|&c| c == '-').count();
+                if dash_count > 20 {
+                    dash_idx2 = Some(i);
+                    break;
+                }
+            }
+            if let Some(idx) = dash_idx2 {
+                for line in lines.iter().skip(idx + 1) {
+                    let clean = Self::clean_ansi(line);
+                    if clean.trim().is_empty() {
+                        continue;
+                    }
+                    let cols: Vec<&str> = clean.split("  ")
+                        .flat_map(|s| s.split('\t'))
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if cols.len() < 2 {
+                        continue;
+                    }
+                    let name = cols[0].to_string();
+                    let id = cols[1].to_string();
+                    let version = if cols.len() > 2 { cols[2].to_string() } else { "unknown".to_string() };
+                    if id.to_lowercase().contains("packages") || name.to_lowercase().contains("source requires") || name.contains("---") {
+                        continue;
+                    }
+                    if !name.is_empty() && !id.is_empty() {
+                        packages.push(Package {
+                            id,
+                            name,
+                            version,
+                            manager: PackageManager::Winget,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
+            }
         }
 
         packages
     }
 
+    fn find_column_offset(header: &str, col_name: &str) -> Option<usize> {
+        let lower_header = header.to_lowercase();
+        let lower_col = col_name.to_lowercase();
+        let mut start = 0;
+        while let Some(pos) = lower_header[start..].find(&lower_col) {
+            let abs_pos = start + pos;
+            let before_ok = abs_pos == 0 || lower_header.as_bytes()[abs_pos - 1] == b' ';
+            let after_pos = abs_pos + lower_col.len();
+            let after_ok = after_pos >= lower_header.len() || lower_header.as_bytes()[after_pos] == b' ';
+            if before_ok && after_ok {
+                return Some(abs_pos);
+            }
+            start = abs_pos + 1;
+            if start >= lower_header.len() {
+                break;
+            }
+        }
+        None
+    }
+
+    fn clean_ansi(s: &str) -> String {
+        let mut result = String::new();
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    while let Some(&next) = chars.peek() {
+                        chars.next();
+                        if next.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
+
     fn parse_winget_upgrades(&self, output: &str) -> Vec<PackageUpdate> {
+        let mut updates = Vec::new();
+        let normalized = output.replace("\r\n", "\n").replace('\r', "\n");
+        let lines: Vec<&str> = normalized.lines().filter(|l| !l.trim().is_empty()).collect();
+
+        let mut header_info: Option<(usize, usize, usize)> = None;
+        let mut dash_idx = None;
+        let mut found_header = false;
+
+        for (i, line) in lines.iter().enumerate() {
+            let clean = Self::clean_ansi(line);
+            let lower = clean.to_lowercase();
+            if !found_header && lower.contains("name") && lower.contains("version") && lower.contains("available") {
+                let id_col = Self::find_column_offset(&clean, "Id");
+                let version_col = Self::find_column_offset(&clean, "Version");
+                let available_col = Self::find_column_offset(&clean, "Available");
+                if let (Some(id_c), Some(ver_c), Some(avail_c)) = (id_col, version_col, available_col) {
+                    if id_c > 0 && ver_c > id_c && avail_c > ver_c {
+                        header_info = Some((id_c, ver_c, avail_c));
+                        found_header = true;
+                    }
+                }
+                continue;
+            }
+            if found_header {
+                let clean2 = Self::clean_ansi(line);
+                let dash_count = clean2.chars().filter(|&c| c == '-').count();
+                if dash_count > 20 {
+                    dash_idx = Some(i);
+                    break;
+                }
+            }
+        }
+
+        if let (Some((id_col, version_col, available_col)), Some(dash_line_idx)) = (header_info, dash_idx) {
+            for line in lines.iter().skip(dash_line_idx + 1) {
+                let clean = Self::clean_ansi(line);
+                if clean.trim().is_empty() {
+                    continue;
+                }
+
+                if clean.len() < available_col {
+                    continue;
+                }
+
+                if !clean.is_char_boundary(id_col) || !clean.is_char_boundary(version_col) || !clean.is_char_boundary(available_col) {
+                    continue;
+                }
+
+                let name = clean[..id_col].trim().to_string();
+                let id = clean[id_col..version_col].trim().to_string();
+                let current_version = clean[version_col..available_col].trim().to_string();
+                let new_version = clean[available_col..].split_whitespace().next().unwrap_or("").trim().to_string();
+
+                if name.to_lowercase().contains("source requires") || id.to_lowercase().contains("upgrades") {
+                    continue;
+                }
+
+                let version_like = |s: &str| s.chars().any(|c| c.is_ascii_digit());
+
+                if !name.is_empty() && !id.is_empty() && version_like(&current_version) && version_like(&new_version) {
+                    updates.push(PackageUpdate {
+                        package: Package {
+                            id: id.clone(),
+                            name,
+                            version: current_version,
+                            manager: PackageManager::Winget,
+                            description: None,
+                            installed_date: None,
+                        },
+                        new_version,
+                        size_bytes: None,
+                        priority: crate::backend::models::UpdatePriority::Normal,
+                        changelog: None,
+                    });
+                }
+            }
+        } else {
+            return self.parse_winget_upgrades_fallback(output);
+        }
+
+        tracing::info!("Parsed {} updates from winget", updates.len());
+        updates
+    }
+
+    fn parse_winget_upgrades_fallback(&self, output: &str) -> Vec<PackageUpdate> {
         let mut updates = Vec::new();
         let lines: Vec<&str> = output.lines().collect();
 
         let mut dash_idx = None;
         for (i, line) in lines.iter().enumerate() {
-            let dash_count = line.chars().filter(|&c| c == '-').count();
+            let clean = Self::clean_ansi(line);
+            let dash_count = clean.chars().filter(|&c| c == '-').count();
             if dash_count > 20 {
                 dash_idx = Some(i);
                 break;
@@ -110,11 +336,12 @@ impl WindowsAdapter {
 
         if let Some(idx) = dash_idx {
             for line in lines.iter().skip(idx + 1) {
-                if line.trim().is_empty() {
+                let clean = Self::clean_ansi(line);
+                if clean.trim().is_empty() {
                     continue;
                 }
 
-                let rest_words: Vec<&str> = line.split_whitespace().collect();
+                let rest_words: Vec<&str> = clean.split_whitespace().collect();
                 if rest_words.len() < 4 {
                     continue;
                 }
@@ -131,27 +358,25 @@ impl WindowsAdapter {
                     continue;
                 }
 
-                let new_version = rest_words[new_version_idx].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
-                let current_version = rest_words[new_version_idx - 1].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
-                let id = rest_words[new_version_idx - 2].replace("\x1b", "").replace("[0m", "").replace("[32m", "").to_string();
-                let name = rest_words[0..(new_version_idx - 2)].join(" ").replace("\x1b", "").replace("[0m", "").replace("[32m", "").trim().to_string();
+                let new_version = rest_words[new_version_idx].to_string();
+                let current_version = rest_words[new_version_idx - 1].to_string();
+                let id = rest_words[new_version_idx - 2].to_string();
+                let name = rest_words[0..(new_version_idx - 2)].join(" ").trim().to_string();
 
                 if id.to_lowercase().contains("upgrades") || current_version.to_lowercase().contains("available") || name.to_lowercase().contains("source requires") {
                     continue;
                 }
 
                 if !name.is_empty() && !id.is_empty() && current_version != "unknown" && new_version != "unknown" {
-                    let package = Package {
-                        id: id.clone(),
-                        name,
-                        version: current_version,
-                        manager: PackageManager::Winget,
-                        description: None,
-                        installed_date: None,
-                    };
-
                     updates.push(PackageUpdate {
-                        package,
+                        package: Package {
+                            id: id.clone(),
+                            name,
+                            version: current_version,
+                            manager: PackageManager::Winget,
+                            description: None,
+                            installed_date: None,
+                        },
                         new_version,
                         size_bytes: None,
                         priority: crate::backend::models::UpdatePriority::Normal,
@@ -161,7 +386,7 @@ impl WindowsAdapter {
             }
         }
 
-        tracing::info!("Parsed {} updates from winget", updates.len());
+        tracing::info!("Parsed {} updates from winget (fallback)", updates.len());
         updates
     }
 
@@ -207,7 +432,6 @@ impl WindowsAdapter {
             install_date: None,
             size: None,
             homepage,
-            category: PackageCategory::from_package_id(&id),
         })
     }
 }
@@ -244,7 +468,7 @@ impl PlatformAdapter for WindowsAdapter {
     async fn scan_packages(&self, manager: &PackageManager) -> Result<Vec<Package>> {
         match manager {
             PackageManager::Winget => {
-                if let Ok(output) = Self::silent_process("winget").args(&["list", "--accept-source-agreements"]).output() {
+                if let Ok(output) = Self::run_winget(&["list"]) {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     return Ok(self.parse_winget_list(&stdout));
                 }
@@ -404,7 +628,7 @@ impl PlatformAdapter for WindowsAdapter {
         let mut all_updates = Vec::new();
 
         // Winget
-        if let Ok(output) = Self::silent_process("winget").args(&["upgrade", "--include-unknown", "--accept-source-agreements"]).output() {
+        if let Ok(output) = Self::run_winget(&["upgrade", "--include-unknown"]) {
             let stdout = String::from_utf8_lossy(&output.stdout);
             all_updates.extend(self.parse_winget_upgrades(&stdout));
         }
@@ -605,9 +829,7 @@ impl PlatformAdapter for WindowsAdapter {
     async fn apply_package_update(&self, update: &PackageUpdate) -> Result<UpdateResult> {
         let output = match update.package.manager {
             PackageManager::Winget => {
-                Self::silent_process("winget")
-                    .args(&["upgrade", "--id", &update.package.id, "--silent", "--accept-source-agreements", "--accept-package-agreements"])
-                    .output()?
+                Self::run_winget(&["upgrade", "--id", &update.package.id, "--silent"])?
             }
             PackageManager::Npm => {
                 Self::silent_cmd()
@@ -664,9 +886,7 @@ impl PlatformAdapter for WindowsAdapter {
     async fn rollback_package(&self, package: &Package, target_version: &str) -> Result<UpdateResult> {
         let output = match package.manager {
             PackageManager::Winget => {
-                Self::silent_process("winget")
-                    .args(&["install", "--id", &package.id, "-v", target_version, "--silent", "--force", "--accept-source-agreements", "--accept-package-agreements"])
-                    .output()?
+                Self::run_winget(&["install", "--id", &package.id, "-v", target_version, "--silent", "--force"])?
             }
             PackageManager::Npm => {
                 Self::silent_cmd()
@@ -733,9 +953,7 @@ impl PlatformAdapter for WindowsAdapter {
     }
 
     async fn get_package_details(&self, package_id: &str) -> Result<Option<PackageDetails>> {
-        let output = Self::silent_process("winget")
-            .args(&["show", "--id", package_id, "--accept-source-agreements"])
-            .output()?;
+        let output = Self::run_winget(&["show", "--id", package_id])?;
 
         if !output.status.success() {
             return Ok(None);

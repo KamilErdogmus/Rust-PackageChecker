@@ -3,7 +3,7 @@ use std::process::Command;
 use std::path::PathBuf;
 use crate::backend::{
     error::Result,
-    models::{Driver, DriverUpdate, Package, PackageManager, PackageUpdate, Platform, UpdateResult, PackageDetails, PackageCategory},
+    models::{Driver, DriverUpdate, Package, PackageManager, PackageUpdate, Platform, UpdateResult, PackageDetails},
 };
 use super::platform_adapter::PlatformAdapter;
 
@@ -308,7 +308,6 @@ impl PlatformAdapter for MacOSAdapter {
             install_date: None,
             size: None,
             homepage: None,
-            category: PackageCategory::from_package_id(package_id),
         }))
     }
 }

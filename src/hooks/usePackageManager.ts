@@ -6,7 +6,6 @@ import type {
   UpdateInfo,
   UpdateResult,
   UpdateHistoryEntry,
-  PackageCategory,
 } from "../types";
 
 export function usePackageManager() {
@@ -25,9 +24,6 @@ export function usePackageManager() {
     const saved = localStorage.getItem("ignoredPackages");
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
-  const [categoryFilter, setCategoryFilter] = useState<PackageCategory | "All">(
-    "All",
-  );
   const [sortBy, setSortBy] = useState<"name" | "size" | "priority">("name");
   const [installedManagers, setInstalledManagers] = useState<string[]>([]);
 
@@ -35,6 +31,22 @@ export function usePackageManager() {
     invoke<string[]>("get_installed_package_managers")
       .then((managers) => setInstalledManagers(managers))
       .catch(() => setInstalledManagers([]));
+
+    (async () => {
+      try {
+        setIsCheckingUpdates(true);
+        const result = await invoke<ScanResult>("scan_system");
+        setScanResult(result);
+        const updateList = await invoke<UpdateInfo[]>("check_updates", {
+          scanResult: result,
+        });
+        setUpdates(updateList);
+        setHasCheckedUpdates(true);
+      } catch {
+      } finally {
+        setIsCheckingUpdates(false);
+      }
+    })();
   }, []);
 
   const getUpdateName = (update: UpdateInfo): string => {
@@ -72,38 +84,6 @@ export function usePackageManager() {
       return update.Package.package.manager;
     }
     return "Winget";
-  };
-
-  const getUpdateCategory = (update: UpdateInfo): PackageCategory => {
-    if ("Package" in update) {
-      const id = update.Package.package.id.toLowerCase();
-      if (
-        id.includes("visual") ||
-        id.includes("code") ||
-        id.includes("git") ||
-        id.includes("python") ||
-        id.includes("node")
-      )
-        return "Development";
-      if (
-        id.includes("driver") ||
-        id.includes("runtime") ||
-        id.includes("framework")
-      )
-        return "System";
-      if (id.includes("media") || id.includes("vlc") || id.includes("spotify"))
-        return "Media";
-      if (id.includes("office") || id.includes("adobe")) return "Productivity";
-      if (id.includes("steam") || id.includes("epic") || id.includes("game"))
-        return "Gaming";
-      if (
-        id.includes("mongo") ||
-        id.includes("postgres") ||
-        id.includes("mysql")
-      )
-        return "Database";
-    }
-    return "Other";
   };
 
   const handleCheckUpdates = async () => {
@@ -177,20 +157,32 @@ export function usePackageManager() {
   const handleUpdateSelected = async () => {
     if (selectedUpdates.size === 0) return;
 
+    let toastId: ReturnType<typeof toast.loading> | undefined;
+
     try {
       setIsUpdating(true);
       const selectedUpdateList = Array.from(selectedUpdates).map(
         (i) => updates[i],
       );
-      toast.loading(`Updating ${selectedUpdateList.length} packages...`);
 
       let successful = 0;
       let failed = 0;
 
-      for (const update of selectedUpdateList) {
+      for (let idx = 0; idx < selectedUpdateList.length; idx++) {
+        const update = selectedUpdateList[idx];
         const packageName = getUpdateName(update);
         try {
           setCurrentlyUpdating(packageName);
+          if (toastId !== undefined) {
+            toast.loading(
+              `(${idx + 1}/${selectedUpdateList.length}) Updating ${packageName}...`,
+              { id: toastId },
+            );
+          } else {
+            toastId = toast.loading(
+              `(1/${selectedUpdateList.length}) Updating ${packageName}...`,
+            );
+          }
           const result = await invoke<UpdateResult>("apply_update", { update });
 
           if (result.status === "Completed") {
@@ -216,7 +208,7 @@ export function usePackageManager() {
         }
       }
 
-      toast.dismiss();
+      if (toastId !== undefined) toast.dismiss(toastId);
       if (failed > 0) {
         toast.warning(
           `Batch update completed: ${successful} successful, ${failed} failed`,
@@ -230,7 +222,7 @@ export function usePackageManager() {
       setUpdates((prev) => prev.filter((_, i) => !selectedUpdates.has(i)));
       setSelectedUpdates(new Set());
     } catch (error) {
-      toast.dismiss();
+      if (toastId !== undefined) toast.dismiss(toastId);
       toast.error(`Batch update error: ${error}`);
     } finally {
       setIsUpdating(false);
@@ -275,13 +267,7 @@ export function usePackageManager() {
       const query = searchQuery.toLowerCase();
       const matchesSearch = name.includes(query) || id.includes(query);
       const notIgnored = !ignoredPackages.has(id);
-
-      if (categoryFilter === "All") return matchesSearch && notIgnored;
-      return (
-        matchesSearch &&
-        notIgnored &&
-        getUpdateCategory(update) === categoryFilter
-      );
+      return matchesSearch && notIgnored;
     })
     .sort((a, b) => {
       if (sortBy === "name")
@@ -365,8 +351,6 @@ export function usePackageManager() {
     currentlyUpdating,
     updateHistory,
     ignoredPackages,
-    categoryFilter,
-    setCategoryFilter,
     sortBy,
     setSortBy,
     filteredUpdates,
@@ -384,6 +368,5 @@ export function usePackageManager() {
     getUpdateName,
     getUpdateId,
     getUpdateVersion,
-    getUpdateCategory,
   };
 }
