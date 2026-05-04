@@ -1,12 +1,9 @@
-// System Update Manager - Cross-platform update manager
-// Backend modules
 pub mod backend;
 pub mod adapters;
 
 use backend::services::{scanner, engine};
 use adapters::create_platform_adapter;
 
-// Tauri commands
 #[tauri::command]
 async fn get_installed_package_managers() -> Result<Vec<String>, String> {
     let adapter = create_platform_adapter();
@@ -48,7 +45,6 @@ async fn apply_update(update: scanner::UpdateInfo) -> Result<backend::models::Up
 #[tauri::command]
 async fn rollback_update(package: backend::models::Package, target_version: String) -> Result<backend::models::UpdateResult, String> {
     let adapter = create_platform_adapter();
-    // Assuming we add rollback to engine, or just call adapter directly here for simplicity
     adapter.rollback_package(&package, &target_version)
         .await
         .map_err(|e| e.to_string())
@@ -66,7 +62,6 @@ async fn apply_batch_updates(updates: Vec<scanner::UpdateInfo>) -> Result<engine
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();

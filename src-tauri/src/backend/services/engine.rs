@@ -1,4 +1,3 @@
-// Update Engine Service
 use std::sync::Arc;
 use crate::backend::{
     error::Result,

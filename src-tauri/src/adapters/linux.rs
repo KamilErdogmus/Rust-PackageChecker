@@ -254,7 +254,6 @@ impl PlatformAdapter for LinuxAdapter {
     async fn check_package_updates(&self, _packages: &[Package]) -> Result<Vec<PackageUpdate>> {
         let mut updates = Vec::new();
 
-        // Apt
         if Self::is_command_available("apt") {
             if let Ok(output) = Command::new("apt").args(["list", "--upgradable"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -265,7 +264,6 @@ impl PlatformAdapter for LinuxAdapter {
                     let parts: Vec<&str> = line.split('/').collect();
                     if parts.is_empty() { continue; }
                     let name = parts[0].trim().to_string();
-                    // new version inside brackets
                     if let (Some(b), Some(e)) = (line.find('['), line.find(']')) {
                         let new_version = line[b + 1..e].trim().to_string();
                         updates.push(PackageUpdate {
@@ -287,7 +285,6 @@ impl PlatformAdapter for LinuxAdapter {
             }
         }
 
-        // Dnf
         if Self::is_command_available("dnf") {
             if let Ok(output) = Command::new("dnf").args(["check-update"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -318,7 +315,6 @@ impl PlatformAdapter for LinuxAdapter {
             }
         }
 
-        // Pacman
         if Self::is_command_available("pacman") {
             if let Ok(output) = Command::new("pacman").args(["-Qu"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -347,7 +343,6 @@ impl PlatformAdapter for LinuxAdapter {
             }
         }
 
-        // NPM
         if Self::is_command_available("npm") {
             if let Ok(output) = Command::new("npm").args(&["outdated", "-g", "--json"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);

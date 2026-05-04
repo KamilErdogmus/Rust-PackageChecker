@@ -15,10 +15,10 @@ pub enum WindowsVersion {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MacOSVersion {
-    Monterey,    // 12
-    Ventura,     // 13
-    Sonoma,      // 14
-    Sequoia,     // 15
+    Monterey,
+    Ventura,
+    Sonoma,
+    Sequoia,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

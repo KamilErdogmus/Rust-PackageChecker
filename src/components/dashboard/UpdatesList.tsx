@@ -10,9 +10,10 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
+import type { PackageManagerContext, UpdateInfo } from "../../types";
 
 interface UpdatesListProps {
-  manager: any;
+  manager: PackageManagerContext;
 }
 
 export function UpdatesList({ manager }: UpdatesListProps) {
@@ -142,7 +143,7 @@ export function UpdatesList({ manager }: UpdatesListProps) {
           {/* Rows */}
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
             <AnimatePresence>
-              {filteredUpdates.map((update: any) => {
+              {filteredUpdates.map((update: UpdateInfo) => {
                 const index = updates.indexOf(update);
                 const versions = getUpdateVersion(update);
                 const name = getUpdateName(update);

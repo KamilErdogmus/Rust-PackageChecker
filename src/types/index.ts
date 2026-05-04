@@ -1,5 +1,3 @@
-// TypeScript type definitions for frontend
-
 export interface Platform {
   type: "Windows" | "MacOS" | "Linux";
   version?: string;
@@ -71,8 +69,6 @@ export interface DriverUpdate {
 export type UpdatePriority = "Critical" | "Important" | "Normal";
 
 export type UpdateStatus = "Completed" | "Failed" | "RequiresReboot";
-
-// Scanner types
 export interface ScanResult {
   platform: Platform;
   packages: Package[];
@@ -81,10 +77,15 @@ export interface ScanResult {
 
 export type UpdateInfo = { Package: PackageUpdate } | { Driver: DriverUpdate };
 
+export interface ChronoDuration {
+  secs: number;
+  nanos: number;
+}
+
 export interface UpdateResult {
   status: UpdateStatus;
   error?: string;
-  duration: any; // chrono::Duration
+  duration: ChronoDuration;
 }
 
 export interface UpdateResultSummary {
@@ -99,7 +100,6 @@ export interface BatchUpdateResult {
   results: UpdateResultSummary[];
 }
 
-// Package details
 export interface PackageDetails {
   id: string;
   name: string;
@@ -110,8 +110,35 @@ export interface PackageDetails {
   size?: string;
   homepage?: string;
 }
+export interface PackageManagerContext {
+  scanResult: ScanResult | null;
+  updates: UpdateInfo[];
+  isCheckingUpdates: boolean;
+  isUpdating: boolean;
+  selectedUpdates: Set<number>;
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
+  hasCheckedUpdates: boolean;
+  currentlyUpdating: string;
+  updateHistory: UpdateHistoryEntry[];
+  ignoredPackages: Set<string>;
+  sortBy: "name" | "size" | "priority";
+  setSortBy: (sort: "name" | "size" | "priority") => void;
+  filteredUpdates: UpdateInfo[];
+  installedManagers: string[];
+  handleCheckUpdates: () => Promise<void>;
+  handleUpdateSingle: (update: UpdateInfo, index: number) => Promise<void>;
+  handleUpdateSelected: () => Promise<void>;
+  toggleUpdateSelection: (index: number) => void;
+  toggleIgnorePackage: (id: string) => void;
+  selectAll: () => void;
+  deselectAll: () => void;
+  handleRollback: (entry: UpdateHistoryEntry) => Promise<void>;
+  getUpdateName: (update: UpdateInfo) => string;
+  getUpdateId: (update: UpdateInfo) => string;
+  getUpdateVersion: (update: UpdateInfo) => { current: string; new: string };
+}
 
-// Update history
 export interface UpdateHistoryEntry {
   package_id: string;
   package_name: string;

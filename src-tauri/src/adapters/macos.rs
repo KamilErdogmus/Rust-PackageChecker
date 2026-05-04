@@ -133,13 +133,11 @@ impl PlatformAdapter for MacOSAdapter {
     async fn check_package_updates(&self, _packages: &[Package]) -> Result<Vec<PackageUpdate>> {
         let mut all_updates = Vec::new();
 
-        // Homebrew
         if let Ok(output) = Command::new("brew").args(["outdated", "--verbose"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             all_updates.extend(self.parse_brew_outdated(&stdout));
         }
 
-        // NPM
         if let Ok(output) = Command::new("npm").args(&["outdated", "-g", "--json"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {

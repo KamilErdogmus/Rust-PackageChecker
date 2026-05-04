@@ -3,9 +3,10 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { motion, AnimatePresence } from "framer-motion";
+import type { PackageManagerContext, UpdateHistoryEntry } from "../../types";
 
 interface HistoryProps {
-  manager: any;
+  manager: PackageManagerContext;
 }
 
 export function History({ manager }: HistoryProps) {
@@ -48,7 +49,7 @@ export function History({ manager }: HistoryProps) {
       ) : (
         <div className="space-y-4">
           <AnimatePresence>
-            {updateHistory.map((entry: any, index: number) => (
+            {updateHistory.map((entry: UpdateHistoryEntry, index: number) => (
               <motion.div
                 key={entry.package_id + entry.timestamp}
                 initial={{ opacity: 0, y: 5 }}

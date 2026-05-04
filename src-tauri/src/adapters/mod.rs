@@ -1,4 +1,3 @@
-// Platform adapters - Platform-specific implementations
 pub mod platform_adapter;
 
 #[cfg(target_os = "windows")]
@@ -15,7 +14,6 @@ pub use platform_adapter::PlatformAdapter;
 #[cfg(target_os = "windows")]
 pub use windows::WindowsAdapter;
 
-// Factory function to create platform adapter
 pub fn create_platform_adapter() -> std::sync::Arc<dyn PlatformAdapter> {
     #[cfg(target_os = "windows")]
     {

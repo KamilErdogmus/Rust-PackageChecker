@@ -1,4 +1,3 @@
-// Update Scanner Service
 use std::sync::Arc;
 use crate::backend::{
     error::Result,
@@ -39,7 +38,6 @@ impl UpdateScanner {
     pub async fn check_updates(&self, scan_result: &ScanResult) -> Result<Vec<UpdateInfo>> {
         let mut all_updates = Vec::new();
         
-        // Check package updates
         match self.platform_adapter.check_package_updates(&scan_result.packages).await {
             Ok(package_updates) => {
                 for update in package_updates {
@@ -49,7 +47,6 @@ impl UpdateScanner {
             Err(e) => tracing::warn!("Failed to check package updates: {}", e),
         }
         
-        // Check driver updates
         match self.platform_adapter.check_driver_updates(&scan_result.drivers).await {
             Ok(driver_updates) => {
                 for update in driver_updates {

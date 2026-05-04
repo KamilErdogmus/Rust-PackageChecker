@@ -3,22 +3,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PackageManager {
-    // Windows
     Winget,
     Chocolatey,
     Scoop,
-    
-    // Cross-platform
     Npm,
     Cargo,
-    Gem,    // Ruby
-    Pip,    // Python
-    
-    // macOS
+    Gem,
+    Pip,
     Homebrew,
-    MacAppStore,  // mas-cli
-    
-    // Linux
+    MacAppStore,
     Apt,
     Dnf,
     Pacman,

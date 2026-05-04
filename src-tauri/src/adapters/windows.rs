@@ -528,7 +528,6 @@ impl PlatformAdapter for WindowsAdapter {
                         if line.is_empty() || line.starts_with("***") {
                             continue;
                         }
-                        // format: name (version1, version2)
                         if let Some(paren_pos) = line.find('(') {
                             let name = line[..paren_pos].trim().to_string();
                             let versions_str = &line[paren_pos + 1..];
@@ -627,13 +626,11 @@ impl PlatformAdapter for WindowsAdapter {
     async fn check_package_updates(&self, _packages: &[Package]) -> Result<Vec<PackageUpdate>> {
         let mut all_updates = Vec::new();
 
-        // Winget
         if let Ok(output) = Self::run_winget(&["upgrade", "--include-unknown"]) {
             let stdout = String::from_utf8_lossy(&output.stdout);
             all_updates.extend(self.parse_winget_upgrades(&stdout));
         }
 
-        // NPM
         if let Ok(output) = Self::silent_cmd().args(&["/C", "npm outdated -g --json"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
@@ -665,7 +662,6 @@ impl PlatformAdapter for WindowsAdapter {
             }
         }
 
-        // Chocolatey
         if Self::is_command_available("choco") {
             if let Ok(output) = Self::silent_process("choco").args(&["outdated"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -703,7 +699,6 @@ impl PlatformAdapter for WindowsAdapter {
             }
         }
 
-        // Gem (Ruby)
         if Self::is_command_available("gem") {
             if let Ok(output) = Self::silent_cmd().args(&["/C", "gem outdated"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -712,11 +707,9 @@ impl PlatformAdapter for WindowsAdapter {
                     if line.is_empty() {
                         continue;
                     }
-                    // format: "name (current < latest)"
                     if let Some(paren_pos) = line.find('(') {
                         let name = line[..paren_pos].trim().to_string();
                         let inside = &line[paren_pos + 1..].trim_end_matches(')');
-                        // inside: "current < latest"
                         if let Some(arrow_pos) = inside.find('<') {
                             let current = inside[..arrow_pos].trim().to_string();
                             let latest = inside[arrow_pos + 1..].trim().to_string();
@@ -742,7 +735,6 @@ impl PlatformAdapter for WindowsAdapter {
             }
         }
 
-        // Pip
         if Self::is_command_available("pip") || Self::is_command_available("pip3") {
             let pip_cmd = if Self::is_command_available("pip3") { "pip3" } else { "pip" };
             if let Ok(output) = Self::silent_cmd()
@@ -777,7 +769,6 @@ impl PlatformAdapter for WindowsAdapter {
             }
         }
 
-        // Scoop
         if Self::is_command_available("scoop") {
             if let Ok(output) = Self::silent_cmd().args(&["/C", "scoop status"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);

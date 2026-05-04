@@ -2,9 +2,10 @@ import { Settings2, ShieldOff, Trash2, Moon, Sun } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { useAppStore } from "../../store";
+import type { PackageManagerContext } from "../../types";
 
 interface SettingsProps {
-  manager: any;
+  manager: PackageManagerContext;
 }
 
 export function Settings({ manager }: SettingsProps) {

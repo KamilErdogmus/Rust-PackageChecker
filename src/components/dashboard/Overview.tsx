@@ -10,8 +10,10 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { motion, AnimatePresence } from "framer-motion";
 
+import type { PackageManagerContext } from "../../types";
+
 interface OverviewProps {
-  manager: any;
+  manager: PackageManagerContext;
   goToUpdates: () => void;
 }
 

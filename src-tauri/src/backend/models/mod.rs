@@ -1,4 +1,3 @@
-// Data models
 pub mod platform;
 pub mod package;
 pub mod driver;
