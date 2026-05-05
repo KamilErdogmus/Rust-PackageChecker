@@ -62,6 +62,7 @@ async fn apply_batch_updates(updates: Vec<scanner::UpdateInfo>) -> Result<engine
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = fix_path_env::fix();
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();

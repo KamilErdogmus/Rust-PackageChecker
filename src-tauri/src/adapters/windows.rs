@@ -34,10 +34,96 @@ impl WindowsAdapter {
         if cmd == "winget" {
             return Self::winget_available();
         }
+        if cmd == "npm" {
+            return Self::npm_available();
+        }
+        let found = Self::silent_cmd()
+            .args(&["/C", &format!("where {}", cmd)])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if found {
+            return true;
+        }
         Self::silent_cmd()
             .args(&["/C", &format!("{} --version", cmd)])
             .output()
             .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn run_npm(args: &[&str]) -> std::io::Result<std::process::Output> {
+        let args_str = args.join(" ");
+        let ps_cmd = format!("npm {}", args_str);
+        let mut c = Command::new("powershell");
+        c.args(&["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
+        c.output()
+    }
+
+    fn pip_available() -> bool {
+        let cmds = ["pip", "pip3", "pip3.13", "pip3.12", "pip3.11"];
+        for cmd in &cmds {
+            if Self::silent_cmd()
+                .args(&["/C", &format!("where {}", cmd)])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+            {
+                return true;
+            }
+        }
+        Self::silent_cmd()
+            .args(&["/C", "py -m pip --version 2>nul"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn get_pip_cmd() -> String {
+        let cmds = ["pip3", "pip", "pip3.13", "pip3.12", "pip3.11"];
+        for cmd in &cmds {
+            if Self::silent_cmd()
+                .args(&["/C", &format!("where {}", cmd)])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+            {
+                return cmd.to_string();
+            }
+        }
+        "py -m pip".to_string()
+    }
+
+    fn npm_available() -> bool {
+        if let Ok(o) = Self::run_npm(&["--version"]) {
+            if o.status.success() {
+                return true;
+            }
+            let out = String::from_utf8_lossy(&o.stdout);
+            let trimmed = out.trim();
+            if !trimmed.is_empty() && trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                return true;
+            }
+        }
+        let mut c = Command::new("powershell");
+        c.args(&["-NoProfile", "-NonInteractive", "-Command",
+            "Get-Command npm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
+        c.output()
+            .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
             .unwrap_or(false)
     }
 
@@ -459,7 +545,7 @@ impl PlatformAdapter for WindowsAdapter {
         if Self::is_command_available("gem") {
             managers.push(PackageManager::Gem);
         }
-        if Self::is_command_available("pip") || Self::is_command_available("pip3") {
+        if Self::pip_available() {
             managers.push(PackageManager::Pip);
         }
         managers
@@ -475,10 +561,26 @@ impl PlatformAdapter for WindowsAdapter {
                 Ok(Vec::new())
             }
             PackageManager::Npm => {
-                if let Ok(output) = Self::silent_cmd().args(&["/C", "npm list -g --depth=0 --json"]).output() {
+                let mut packages = Vec::new();
+                if let Ok(output) = Self::run_npm(&["--version"]) {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "npm".to_string(),
+                            name: "npm".to_string(),
+                            version,
+                            manager: PackageManager::Npm,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
+                if let Ok(output) = Self::run_npm(&["list", "-g", "--depth=0", "--json"]) {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
-                        let mut packages = Vec::new();
+                    let raw = stdout.trim();
+                    let json_start = raw.find('{').unwrap_or(0);
+                    let json_str = &raw[json_start..];
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) {
                         if let Some(deps) = json.get("dependencies").and_then(|d| d.as_object()) {
                             for (name, info) in deps {
                                 if let Some(version) = info.get("version").and_then(|v| v.as_str()) {
@@ -493,18 +595,30 @@ impl PlatformAdapter for WindowsAdapter {
                                 }
                             }
                         }
-                        return Ok(packages);
                     }
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             PackageManager::Chocolatey => {
+                let mut packages = Vec::new();
+                if let Ok(output) = Self::silent_process("choco").args(&["--version"]).output() {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "chocolatey".to_string(),
+                            name: "Chocolatey".to_string(),
+                            version,
+                            manager: PackageManager::Chocolatey,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
                 if let Ok(output) = Self::silent_process("choco").args(&["list", "--local-only"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    let mut packages = Vec::new();
                     for line in stdout.lines() {
                         let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() == 2 && !line.contains("packages installed") {
+                        if parts.len() == 2 && !line.contains("packages installed") && parts[0].to_lowercase() != "chocolatey" {
                             packages.push(Package {
                                 id: parts[0].to_string(),
                                 name: parts[0].to_string(),
@@ -515,14 +629,26 @@ impl PlatformAdapter for WindowsAdapter {
                             });
                         }
                     }
-                    return Ok(packages);
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             PackageManager::Gem => {
+                let mut packages = Vec::new();
+                if let Ok(output) = Self::silent_cmd().args(&["/C", "gem --version"]).output() {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "gem".to_string(),
+                            name: "RubyGems".to_string(),
+                            version,
+                            manager: PackageManager::Gem,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
                 if let Ok(output) = Self::silent_cmd().args(&["/C", "gem list --local"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    let mut packages = Vec::new();
                     for line in stdout.lines() {
                         let line = line.trim();
                         if line.is_empty() || line.starts_with("***") {
@@ -550,43 +676,81 @@ impl PlatformAdapter for WindowsAdapter {
                             }
                         }
                     }
-                    return Ok(packages);
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             PackageManager::Pip => {
-                let pip_cmd = if Self::is_command_available("pip3") { "pip3" } else { "pip" };
+                let pip_cmd = Self::get_pip_cmd();
+                let mut packages = Vec::new();
                 if let Ok(output) = Self::silent_cmd()
-                    .args(&["/C", &format!("{} list --format=json", pip_cmd)])
+                    .args(&["/C", &format!("{} --version 2>nul", pip_cmd)])
+                    .output()
+                {
+                    let ver_str = String::from_utf8_lossy(&output.stdout);
+                    let version = ver_str.split_whitespace().nth(1).unwrap_or("").to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "pip".to_string(),
+                            name: "pip".to_string(),
+                            version,
+                            manager: PackageManager::Pip,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
+                if let Ok(output) = Self::silent_cmd()
+                    .args(&["/C", &format!("{} list --format=json 2>nul", pip_cmd)])
                     .output()
                 {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&stdout) {
-                        let mut packages = Vec::new();
+                    let raw = stdout.trim();
+                    let json_start = raw.find('[').unwrap_or(0);
+                    let json_str = &raw[json_start..];
+                    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(json_str) {
                         for item in arr {
                             if let (Some(name), Some(version)) = (
                                 item.get("name").and_then(|v| v.as_str()),
                                 item.get("version").and_then(|v| v.as_str()),
                             ) {
-                                packages.push(Package {
-                                    id: name.to_string(),
-                                    name: name.to_string(),
-                                    version: version.to_string(),
-                                    manager: PackageManager::Pip,
-                                    description: None,
-                                    installed_date: None,
-                                });
+                                if name.to_lowercase() != "pip" && name.to_lowercase() != "pip3" {
+                                    packages.push(Package {
+                                        id: name.to_string(),
+                                        name: name.to_string(),
+                                        version: version.to_string(),
+                                        manager: PackageManager::Pip,
+                                        description: None,
+                                        installed_date: None,
+                                    });
+                                }
                             }
                         }
-                        return Ok(packages);
                     }
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             PackageManager::Scoop => {
+                let mut packages = Vec::new();
+                if let Ok(output) = Self::silent_cmd().args(&["/C", "scoop --version"]).output() {
+                    let ver_str = String::from_utf8_lossy(&output.stdout);
+                    let version = ver_str.lines()
+                        .find(|l| l.trim().starts_with("Current Scoop version:"))
+                        .and_then(|l| l.split(':').nth(1))
+                        .map(|v| v.trim().to_string())
+                        .unwrap_or_else(|| ver_str.lines().next().unwrap_or("").trim().to_string());
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "scoop".to_string(),
+                            name: "Scoop".to_string(),
+                            version,
+                            manager: PackageManager::Scoop,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
                 if let Ok(output) = Self::silent_cmd().args(&["/C", "scoop list"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    let mut packages = Vec::new();
                     let mut header_passed = false;
                     for line in stdout.lines() {
                         let line = line.trim();
@@ -615,9 +779,8 @@ impl PlatformAdapter for WindowsAdapter {
                             });
                         }
                     }
-                    return Ok(packages);
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             _ => Ok(Vec::new()),
         }
@@ -631,9 +794,47 @@ impl PlatformAdapter for WindowsAdapter {
             all_updates.extend(self.parse_winget_upgrades(&stdout));
         }
 
-        if let Ok(output) = Self::silent_cmd().args(&["/C", "npm outdated -g --json"]).output() {
+        if let Ok(output) = Self::run_winget(&["upgrade", "--source", "msstore"]) {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            let store_updates = self.parse_winget_upgrades(&stdout);
+            for su in store_updates {
+                if !all_updates.iter().any(|u| u.package.id == su.package.id) {
+                    all_updates.push(su);
+                }
+            }
+        }
+
+        if let Ok(ver_out) = Self::run_npm(&["--version"]) {
+            let current = String::from_utf8_lossy(&ver_out.stdout).trim().to_string();
+            if !current.is_empty() {
+                if let Ok(latest_out) = Self::run_npm(&["view", "npm", "version"]) {
+                    let latest = String::from_utf8_lossy(&latest_out.stdout).trim().to_string();
+                    if !latest.is_empty() && latest != current {
+                        all_updates.push(PackageUpdate {
+                            package: Package {
+                                id: "npm".to_string(),
+                                name: "npm".to_string(),
+                                version: current,
+                                manager: PackageManager::Npm,
+                                description: None,
+                                installed_date: None,
+                            },
+                            new_version: latest,
+                            size_bytes: None,
+                            priority: crate::backend::models::UpdatePriority::Normal,
+                            changelog: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Ok(output) = Self::run_npm(&["outdated", "-g", "--json"]) {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let raw = stdout.trim();
+            let json_start = raw.find('{').unwrap_or(0);
+            let json_str = &raw[json_start..];
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) {
                 if let Some(deps) = json.as_object() {
                     for (name, info) in deps {
                         if let (Some(current), Some(latest)) = (
@@ -663,6 +864,36 @@ impl PlatformAdapter for WindowsAdapter {
         }
 
         if Self::is_command_available("choco") {
+            if let Ok(ver_out) = Self::silent_process("choco").args(&["--version"]).output() {
+                let current = String::from_utf8_lossy(&ver_out.stdout).trim().to_string();
+                if !current.is_empty() {
+                    if let Ok(info_out) = Self::silent_process("choco").args(&["info", "chocolatey", "--limitoutput"]).output() {
+                        let info_str = String::from_utf8_lossy(&info_out.stdout);
+                        let latest = info_str.lines()
+                            .next()
+                            .and_then(|l| l.split('|').nth(1))
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        if !latest.is_empty() && latest != current {
+                            all_updates.push(PackageUpdate {
+                                package: Package {
+                                    id: "chocolatey".to_string(),
+                                    name: "Chocolatey".to_string(),
+                                    version: current,
+                                    manager: PackageManager::Chocolatey,
+                                    description: None,
+                                    installed_date: None,
+                                },
+                                new_version: latest,
+                                size_bytes: None,
+                                priority: crate::backend::models::UpdatePriority::Normal,
+                                changelog: None,
+                            });
+                        }
+                    }
+                }
+            }
             if let Ok(output) = Self::silent_process("choco").args(&["outdated"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let mut dash_found = false;
@@ -735,10 +966,10 @@ impl PlatformAdapter for WindowsAdapter {
             }
         }
 
-        if Self::is_command_available("pip") || Self::is_command_available("pip3") {
-            let pip_cmd = if Self::is_command_available("pip3") { "pip3" } else { "pip" };
+        if Self::pip_available() {
+            let pip_cmd = Self::get_pip_cmd();
             if let Ok(output) = Self::silent_cmd()
-                .args(&["/C", &format!("{} list --outdated --format=json", pip_cmd)])
+                .args(&["/C", &format!("{} list --outdated --format=json 2>nul", pip_cmd)])
                 .output()
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -770,6 +1001,40 @@ impl PlatformAdapter for WindowsAdapter {
         }
 
         if Self::is_command_available("scoop") {
+            if let Ok(ver_out) = Self::silent_cmd().args(&["/C", "scoop --version"]).output() {
+                let ver_str = String::from_utf8_lossy(&ver_out.stdout);
+                let current = ver_str.lines()
+                    .find(|l| l.trim().starts_with("Current Scoop version:"))
+                    .and_then(|l| l.split(':').nth(1))
+                    .map(|v| v.trim().to_string())
+                    .unwrap_or_else(|| ver_str.lines().next().unwrap_or("").trim().to_string());
+                if !current.is_empty() {
+                    if let Ok(info_out) = Self::silent_cmd().args(&["/C", "scoop info scoop"]).output() {
+                        let info_str = String::from_utf8_lossy(&info_out.stdout);
+                        let latest = info_str.lines()
+                            .find(|l| l.trim().starts_with("Version:"))
+                            .and_then(|l| l.split(':').nth(1))
+                            .map(|v| v.trim().to_string())
+                            .unwrap_or_default();
+                        if !latest.is_empty() && latest != current {
+                            all_updates.push(PackageUpdate {
+                                package: Package {
+                                    id: "scoop".to_string(),
+                                    name: "Scoop".to_string(),
+                                    version: current,
+                                    manager: PackageManager::Scoop,
+                                    description: None,
+                                    installed_date: None,
+                                },
+                                new_version: latest,
+                                size_bytes: None,
+                                priority: crate::backend::models::UpdatePriority::Normal,
+                                changelog: None,
+                            });
+                        }
+                    }
+                }
+            }
             if let Ok(output) = Self::silent_cmd().args(&["/C", "scoop status"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let mut header_passed = false;

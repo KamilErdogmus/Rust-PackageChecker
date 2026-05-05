@@ -240,7 +240,7 @@ export function Overview({ manager, goToUpdates }: OverviewProps) {
                 Available Updates
               </p>
               <h4 className="text-3xl font-bold text-zinc-800 dark:text-zinc-100">
-                {scanResult.updatable_count ?? 0}
+                {updates.length}
               </h4>
             </div>
           </Card>
@@ -253,7 +253,7 @@ export function Overview({ manager, goToUpdates }: OverviewProps) {
                 Total Packages
               </p>
               <h4 className="text-3xl font-bold text-zinc-800 dark:text-zinc-100">
-                {scanResult.scanned_count ?? 0}
+                {scanResult.packages.length}
               </h4>
             </div>
           </Card>

@@ -139,31 +139,91 @@ impl PlatformAdapter for LinuxAdapter {
     async fn scan_packages(&self, manager: &PackageManager) -> Result<Vec<Package>> {
         match manager {
             PackageManager::Apt => {
+                let mut packages = Vec::new();
+                if let Ok(output) = Command::new("apt").args(["--version"]).output() {
+                    let ver_str = String::from_utf8_lossy(&output.stdout);
+                    let version = ver_str.split_whitespace().nth(1).unwrap_or("").to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "apt".to_string(),
+                            name: "apt".to_string(),
+                            version,
+                            manager: PackageManager::Apt,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
                 if let Ok(output) = Command::new("apt").args(["list", "--installed"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    return Ok(Self::parse_apt_list(&stdout));
+                    packages.extend(Self::parse_apt_list(&stdout));
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             PackageManager::Dnf => {
+                let mut packages = Vec::new();
+                if let Ok(output) = Command::new("dnf").args(["--version"]).output() {
+                    let ver_str = String::from_utf8_lossy(&output.stdout);
+                    let version = ver_str.lines().next().unwrap_or("").trim().to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "dnf".to_string(),
+                            name: "dnf".to_string(),
+                            version,
+                            manager: PackageManager::Dnf,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
                 if let Ok(output) = Command::new("dnf").args(["list", "installed"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    return Ok(Self::parse_dnf_list(&stdout));
+                    packages.extend(Self::parse_dnf_list(&stdout));
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             PackageManager::Pacman => {
+                let mut packages = Vec::new();
+                if let Ok(output) = Command::new("pacman").args(["--version"]).output() {
+                    let ver_str = String::from_utf8_lossy(&output.stdout);
+                    let version = ver_str.lines().next()
+                        .and_then(|l| l.split_whitespace().nth(1))
+                        .unwrap_or("").to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "pacman".to_string(),
+                            name: "pacman".to_string(),
+                            version,
+                            manager: PackageManager::Pacman,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
                 if let Ok(output) = Command::new("pacman").args(["-Q"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    return Ok(Self::parse_pacman_list(&stdout));
+                    packages.extend(Self::parse_pacman_list(&stdout));
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             PackageManager::Npm => {
+                let mut packages = Vec::new();
+                if let Ok(output) = Command::new("npm").args(&["--version"]).output() {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "npm".to_string(),
+                            name: "npm".to_string(),
+                            version,
+                            manager: PackageManager::Npm,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
                 if let Ok(output) = Command::new("npm").args(&["list", "-g", "--depth=0", "--json"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
-                        let mut packages = Vec::new();
                         if let Some(deps) = json.get("dependencies").and_then(|d| d.as_object()) {
                             for (name, info) in deps {
                                 if let Some(version) = info.get("version").and_then(|v| v.as_str()) {
@@ -178,41 +238,68 @@ impl PlatformAdapter for LinuxAdapter {
                                 }
                             }
                         }
-                        return Ok(packages);
                     }
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             PackageManager::Pip => {
                 let pip_cmd = if Self::is_command_available("pip3") { "pip3" } else { "pip" };
+                let mut packages = Vec::new();
+                if let Ok(output) = Command::new(pip_cmd).args(&["--version"]).output() {
+                    let ver_str = String::from_utf8_lossy(&output.stdout);
+                    let version = ver_str.split_whitespace().nth(1).unwrap_or("").to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "pip".to_string(),
+                            name: pip_cmd.to_string(),
+                            version,
+                            manager: PackageManager::Pip,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
                 if let Ok(output) = Command::new(pip_cmd).args(&["list", "--format=json"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&stdout) {
-                        let mut packages = Vec::new();
                         for item in arr {
                             if let (Some(name), Some(version)) = (
                                 item.get("name").and_then(|v| v.as_str()),
                                 item.get("version").and_then(|v| v.as_str()),
                             ) {
-                                packages.push(Package {
-                                    id: name.to_string(),
-                                    name: name.to_string(),
-                                    version: version.to_string(),
-                                    manager: PackageManager::Pip,
-                                    description: None,
-                                    installed_date: None,
-                                });
+                                if name.to_lowercase() != "pip" && name.to_lowercase() != "pip3" {
+                                    packages.push(Package {
+                                        id: name.to_string(),
+                                        name: name.to_string(),
+                                        version: version.to_string(),
+                                        manager: PackageManager::Pip,
+                                        description: None,
+                                        installed_date: None,
+                                    });
+                                }
                             }
                         }
-                        return Ok(packages);
                     }
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             PackageManager::Gem => {
+                let mut packages = Vec::new();
+                if let Ok(output) = Command::new("gem").args(&["--version"]).output() {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !version.is_empty() {
+                        packages.push(Package {
+                            id: "gem".to_string(),
+                            name: "RubyGems".to_string(),
+                            version,
+                            manager: PackageManager::Gem,
+                            description: None,
+                            installed_date: None,
+                        });
+                    }
+                }
                 if let Ok(output) = Command::new("gem").args(&["list", "--local"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    let mut packages = Vec::new();
                     for line in stdout.lines() {
                         let line = line.trim();
                         if line.is_empty() || line.starts_with("***") {
@@ -239,9 +326,8 @@ impl PlatformAdapter for LinuxAdapter {
                             }
                         }
                     }
-                    return Ok(packages);
                 }
-                Ok(Vec::new())
+                Ok(packages)
             }
             _ => Ok(Vec::new()),
         }
@@ -344,6 +430,30 @@ impl PlatformAdapter for LinuxAdapter {
         }
 
         if Self::is_command_available("npm") {
+            if let Ok(ver_out) = Command::new("npm").args(&["--version"]).output() {
+                let current = String::from_utf8_lossy(&ver_out.stdout).trim().to_string();
+                if !current.is_empty() {
+                    if let Ok(latest_out) = Command::new("npm").args(&["view", "npm", "version"]).output() {
+                        let latest = String::from_utf8_lossy(&latest_out.stdout).trim().to_string();
+                        if !latest.is_empty() && latest != current {
+                            updates.push(PackageUpdate {
+                                package: Package {
+                                    id: "npm".to_string(),
+                                    name: "npm".to_string(),
+                                    version: current,
+                                    manager: PackageManager::Npm,
+                                    description: None,
+                                    installed_date: None,
+                                },
+                                new_version: latest,
+                                size_bytes: None,
+                                priority: crate::backend::models::UpdatePriority::Normal,
+                                changelog: None,
+                            });
+                        }
+                    }
+                }
+            }
             if let Ok(output) = Command::new("npm").args(&["outdated", "-g", "--json"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
