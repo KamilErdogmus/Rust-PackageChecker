@@ -794,15 +794,7 @@ impl PlatformAdapter for WindowsAdapter {
             all_updates.extend(self.parse_winget_upgrades(&stdout));
         }
 
-        if let Ok(output) = Self::run_winget(&["upgrade", "--source", "msstore"]) {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let store_updates = self.parse_winget_upgrades(&stdout);
-            for su in store_updates {
-                if !all_updates.iter().any(|u| u.package.id == su.package.id) {
-                    all_updates.push(su);
-                }
-            }
-        }
+        
 
         if let Ok(ver_out) = Self::run_npm(&["--version"]) {
             let current = String::from_utf8_lossy(&ver_out.stdout).trim().to_string();
