@@ -960,6 +960,42 @@ impl PlatformAdapter for WindowsAdapter {
 
         if Self::pip_available() {
             let pip_cmd = Self::get_pip_cmd();
+            if let Ok(ver_out) = Self::silent_cmd()
+                .args(&["/C", &format!("{} --version 2>nul", pip_cmd)])
+                .output()
+            {
+                let ver_str = String::from_utf8_lossy(&ver_out.stdout);
+                let current = ver_str.split_whitespace().nth(1).unwrap_or("").to_string();
+                if !current.is_empty() {
+                    if let Ok(latest_out) = Self::silent_cmd()
+                        .args(&["/C", &format!("{} index versions pip 2>nul", pip_cmd)])
+                        .output()
+                    {
+                        let latest_str = String::from_utf8_lossy(&latest_out.stdout);
+                        let latest = latest_str.lines()
+                            .find(|l| l.contains("LATEST:"))
+                            .and_then(|l| l.split("LATEST:").nth(1))
+                            .map(|v| v.trim().to_string())
+                            .unwrap_or_default();
+                        if !latest.is_empty() && latest != current {
+                            all_updates.push(PackageUpdate {
+                                package: Package {
+                                    id: "pip".to_string(),
+                                    name: "pip".to_string(),
+                                    version: current,
+                                    manager: PackageManager::Pip,
+                                    description: None,
+                                    installed_date: None,
+                                },
+                                new_version: latest,
+                                size_bytes: None,
+                                priority: crate::backend::models::UpdatePriority::Normal,
+                                changelog: None,
+                            });
+                        }
+                    }
+                }
+            }
             if let Ok(output) = Self::silent_cmd()
                 .args(&["/C", &format!("{} list --outdated --format=json 2>nul", pip_cmd)])
                 .output()
@@ -972,6 +1008,10 @@ impl PlatformAdapter for WindowsAdapter {
                             item.get("version").and_then(|v| v.as_str()),
                             item.get("latest_version").and_then(|v| v.as_str()),
                         ) {
+                            let name_lower = name.to_lowercase();
+                            if name_lower == "pip" || name_lower == "pip3" {
+                                continue;
+                            }
                             all_updates.push(PackageUpdate {
                                 package: Package {
                                     id: name.to_string(),
@@ -1095,9 +1135,10 @@ impl PlatformAdapter for WindowsAdapter {
                     .output()?
             }
             PackageManager::Pip => {
-                let pip_cmd = if Self::is_command_available("pip3") { "pip3" } else { "pip" };
+                let pip_cmd = Self::get_pip_cmd();
+                let pkg_id = if update.package.id == "pip" { "pip".to_string() } else { update.package.id.clone() };
                 Self::silent_cmd()
-                    .args(&["/C", &format!("{} install --upgrade {}", pip_cmd, update.package.id)])
+                    .args(&["/C", &format!("{} install --upgrade {} 2>nul", pip_cmd, pkg_id)])
                     .output()?
             }
             PackageManager::Scoop => {
